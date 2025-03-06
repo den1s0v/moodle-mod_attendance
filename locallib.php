@@ -1290,10 +1290,22 @@ function attendance_generate_passwords($session) {
 
     for ($i = 0; $i < 30; $i++) {
         array_push($password, array("attendanceid" => $session->id,
-            "password" => random_string(), "expirytime" => time() + ($attconfig->rotateqrcodeinterval * $i)));
+            "password" => attendance_generate_password(), "expirytime" => time() + ($attconfig->rotateqrcodeinterval * $i)));
     }
 
     $DB->insert_records('attendance_rotate_passwords', $password);
+}
+
+/**
+ * Generate a QR code password.
+ */
+function attendance_generate_password() {
+    $attconfig = get_config('attendance');
+    if ($attconfig->randompasswordkind == 2) {
+        return random_string();
+    } else {
+        return mt_rand(1000, 10000);
+    }
 }
 
 /**
