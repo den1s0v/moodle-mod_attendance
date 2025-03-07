@@ -238,8 +238,9 @@ class addsession extends moodleform {
             $mform->hideif('passwordgrp', 'automark', 'eq', ATTENDANCE_AUTOMARK_ALL);
 
             $mform->addElement('checkbox', 'autoassignstatus', '', get_string('autoassignstatus', 'attendance'));
-            $mform->addHelpButton('autoassignstatus', 'autoassignstatus', 'attendance');
+            // $mform->addHelpButton('autoassignstatus', 'autoassignstatus', 'attendance');
             $mform->hideif('autoassignstatus', 'studentscanmark', 'notchecked');
+            $mform->disabledIf('autoassignstatus', 'studentscanmark', 'checked');  // In fact, it's disabled any time it's visible.
             if (isset($pluginconfig->autoassignstatus)) {
                 $mform->setDefault('autoassignstatus', $pluginconfig->autoassignstatus);
             }
