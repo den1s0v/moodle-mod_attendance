@@ -60,7 +60,7 @@ if ($attforsession->rotateqrcode == 1) {
         // Check password.
         $sql = 'SELECT * FROM {attendance_rotate_passwords}'.
             ' WHERE attendanceid = ? AND expirytime > ? ORDER BY expirytime ASC';
-        $qrpassdatabase = $DB->get_records_sql($sql, ['attendanceid' => $id, time() - $attconfig->rotateqrcodeexpirymargin], 0, 2);
+        $qrpassdatabase = $DB->get_records_sql($sql, ['attendanceid' => $id, time() - $attconfig->rotateqrcodeexpirymargin], 0, 50);
 
         foreach ($qrpassdatabase as $qrpasselement) {
             if ($qrpass == $qrpasselement->password) {
@@ -70,7 +70,7 @@ if ($attforsession->rotateqrcode == 1) {
 
         if ($qrpassflag) {
             // Create and store the token.
-            setcookie($cookiename, $secrethash, time() + (60 * 5), "/");
+            setcookie($cookiename, $secrethash, time() + (60 * 25), "/");
         } else {
             // Flag error.
             throw new moodle_exception('qr_pass_wrong', 'mod_attendance', $url);
