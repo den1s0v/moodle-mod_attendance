@@ -49,14 +49,20 @@ if ($attforsession->rotateqrcode == 1) {
     $secrethash = md5($USER->id.$attforsession->rotateqrcodesecret);
     $url = new moodle_url('/mod/attendance/view.php', array('id' => $cm->id));
 
+    $cookies_expired = true;
+
     // Check if cookie is set and verify.
     if (isset($_COOKIE[$cookiename])) {
         // Check the token.
         if ($secrethash !== $_COOKIE[$cookiename]) {
             // Flag error.
-            throw new moodle_exception('qr_cookie_error', 'mod_attendance', $url);
+            $cookies_expired = true;
+        } else {
+            $cookies_expired = false;
         }
-    } else {
+    }
+
+    if ($cookies_expired) {
         // Check password.
         $sql = 'SELECT * FROM {attendance_rotate_passwords}'.
             ' WHERE attendanceid = ? AND expirytime > ? ORDER BY expirytime ASC';
