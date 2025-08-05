@@ -13,13 +13,16 @@ class attendance_QRCodeRotate {
         this.password = "";
         this.qrCodeInstance = "";
         this.qrCodeHTMLElement = "";
+        this.passwordHTMLElement = "";
+        this.timerHTMLElement = "";
         this.timeOffset = new Date();
     }
 
-    start(sessionId, qrCodeHTMLElement, timerHTMLElement, serverTime) {
+    start(sessionId, qrCodeHTMLElement, timerHTMLElement, passwordHTMLElement, serverTime) {
         this.sessionId = sessionId;
         this.qrCodeHTMLElement = qrCodeHTMLElement;
         this.timerHTMLElement = timerHTMLElement;
+        this.passwordHTMLElement = passwordHTMLElement;
         this.timeOffset = new Date() - new Date(serverTime * 1000);
         console.log(`Sync OK - Server time is ${new Date(serverTime * 1000)}\nClient's time is ${this.timeOffset < 0 ? 'late' : 'early'} by ${Math.abs(this.timeOffset)} milliseconds.`);
         this.fetchAndRotate();
@@ -46,6 +49,11 @@ class attendance_QRCodeRotate {
         this.timerHTMLElement.innerHTML = timeLeft;
     }
 
+    updatePassword(password) {
+        if (this.passwordHTMLElement)
+            this.passwordHTMLElement.innerHTML = password;
+    }
+
     serverTime() {
         return Math.round((new Date().getTime() - this.timeOffset) / 1000);
     }
@@ -66,7 +74,7 @@ class attendance_QRCodeRotate {
             } else {
                 parent.changeQRCode(found.password);
                 parent.updateTimer(found.expirytime - parent.serverTime());
-
+                parent.updatePassword(found.password)
             }
 
         }, 1000);

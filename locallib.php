@@ -1449,6 +1449,35 @@ function attendance_renderqrcoderotate($session) {
             'type' => 'text/javascript',
         ]
     );
+    echo html_writer::tag(
+        'style',
+        '.attendance-showpassword {
+            margin-top: 5px;
+            padding: 10px;
+            /* border: 1px solid #ddd;
+            border-radius: 4px; */
+        }
+        .attendance-showpassword summary {
+            /* font-weight: bold; */
+            cursor: pointer;
+        }
+        #attendance-pass {
+            font-family: consolas;
+            font-weight: 800;
+            font-size: 1.5em;
+        }',
+        [
+            'type' => 'text/css',
+        ]
+    );
+    if (1 /* проверка на то, что разрешен показ пароля вместе с QR */) {
+        // Показать пароль.
+        echo html_writer::start_tag('details', ['open' => 1, 'class' => 'attendance-showpassword']);
+        echo html_writer::tag('summary', /* get_string('showpassword', 'attendance') ?? */ 'или отметьтесь вручную');
+        echo 'используя пароль ';
+        echo html_writer::tag('strong', '', ['id' => 'attendance-pass']);
+        echo html_writer::end_tag('details');
+    }
     echo html_writer::div('', '', ['id' => 'qrcode']); // Div to display qr code.
     echo html_writer::div(get_string('qrcodevalidbefore', 'attendance').' '.
                           html_writer::span('0', '', ['id' => 'rotate-time']).' '
@@ -1457,8 +1486,8 @@ function attendance_renderqrcoderotate($session) {
     echo '
     <script type="text/javascript">
         let qrCodeRotate = new attendance_QRCodeRotate();
-        qrCodeRotate.start(' . $session->id . ', document.getElementById("qrcode"), document.getElementById("rotate-time"), '.
-        time() .');
+        qrCodeRotate.start(' . $session->id . ', document.getElementById("qrcode"), document.getElementById("rotate-time"), document.getElementById("attendance-pass"), ' .
+        time() . ');
     </script>';
 }
 
