@@ -1421,11 +1421,14 @@ function attendance_generate_passwords($session) {
 /**
  * Generate a QR code password.
  */
-function attendance_generate_password() {
+function attendance_generate_password()
+{
     $attconfig = get_config('attendance');
     if ($attconfig->randompasswordkind == 2) {
-        return random_string();
+        // 8 digits + mixed-case letters.
+        return random_string(8);
     } else {
+        // 4 digits.
         return mt_rand(1000, 10000);
     }
 }
