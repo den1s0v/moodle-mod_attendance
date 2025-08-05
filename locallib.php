@@ -885,7 +885,8 @@ function attendance_construct_sessions_data_for_add($formdata, mod_attendance_st
                         }
                         if (!empty($formdata->rotateqrcode)) {
                             $sess->rotateqrcode = $formdata->rotateqrcode;
-                            $sess->studentpassword = attendance_random_string();
+                            // Note: do not overwrite user-entered value for password with random value.
+                            // $sess->studentpassword = attendance_random_string();
                             $sess->rotateqrcodesecret = attendance_random_string();
                         }
                         if (!empty($formdata->preventsharedip)) {
@@ -980,7 +981,8 @@ function attendance_construct_sessions_data_for_add($formdata, mod_attendance_st
             }
             if (!empty($formdata->rotateqrcode)) {
                 $sess->rotateqrcode = $formdata->rotateqrcode;
-                $sess->studentpassword = attendance_random_string();
+                // Note: do not overwrite user-entered value for password with random value.
+                // $sess->studentpassword = attendance_random_string();
                 $sess->rotateqrcodesecret = attendance_random_string();
             }
             if (!empty($formdata->usedefaultsubnet)) {
