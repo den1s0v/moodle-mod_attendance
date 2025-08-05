@@ -180,6 +180,18 @@ if ($ADMIN->fulltree) {
     $settings->add(new admin_setting_configcheckbox('attendance/autoassignstatus',
         get_string('autoassignstatus', 'attendance'), '', 0));
 
+    $options = array(
+        1 => get_string('simple', 'attendance'),
+        2 => get_string('complex', 'attendance')
+    );
+
+    $settings->add(new admin_setting_configselect('attendance/randompasswordkind',
+        get_string('randompasswordkind', 'attendance'),
+        get_string('randompasswordkind_desc', 'attendance'),
+        1,
+        $options
+    ));
+
     $options = attendance_get_sharedipoptions();
     $settings->add(new admin_setting_configselect('attendance/preventsharedip',
         get_string('preventsharedip', 'attendance'),
