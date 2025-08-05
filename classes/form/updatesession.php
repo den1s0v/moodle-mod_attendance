@@ -76,7 +76,8 @@ class updatesession extends \moodleform {
             'automarkcompleted' => 0,
             'preventsharedip' => $sess->preventsharedip,
             'preventsharediptime' => $sess->preventsharediptime,
-            'includeqrcode' => $sess->includeqrcode,
+            // Note: if rotateqrcode is ON, it's no sence in showing unchecked includeqrcode (in disabled state).
+            'includeqrcode' => $sess->includeqrcode || $sess->rotateqrcode,
             'rotateqrcode' => $sess->rotateqrcode,
             'automarkcmid' => $sess->automarkcmid,
             'studentsearlyopentime' => $sess->studentsearlyopentime,
