@@ -632,8 +632,10 @@ class mod_attendance_structure {
             }
             if (!empty($formdata->rotateqrcode)) {
                 $sess->rotateqrcode = $formdata->rotateqrcode;
-                // Note: do not overwrite user-entered value for password with random value.
-                // $sess->studentpassword = attendance_random_string();
+                // Note: do not overwrite user-entered value for password with random value, but make sure it is not empty.
+                if (!$sess->studentpassword) {
+                    $sess->studentpassword = attendance_random_string();
+                }
                 $sess->rotateqrcodesecret = attendance_random_string();
             }
         }

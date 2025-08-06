@@ -943,8 +943,10 @@ function attendance_construct_sessions_data_for_add($formdata, mod_attendance_st
                         }
                         if (!empty($formdata->rotateqrcode)) {
                             $sess->rotateqrcode = $formdata->rotateqrcode;
-                            // Note: do not overwrite user-entered value for password with random value.
-                            // $sess->studentpassword = attendance_random_string();
+                            // Note: do not overwrite user-entered value for password with random value, but make sure it is not empty.
+                            if (!$sess->studentpassword) {
+                                $sess->studentpassword = attendance_random_string();
+                            }
                             $sess->rotateqrcodesecret = attendance_random_string();
                         }
                         if (!empty($formdata->preventsharedip)) {
@@ -1039,8 +1041,10 @@ function attendance_construct_sessions_data_for_add($formdata, mod_attendance_st
             }
             if (!empty($formdata->rotateqrcode)) {
                 $sess->rotateqrcode = $formdata->rotateqrcode;
-                // Note: do not overwrite user-entered value for password with random value.
-                // $sess->studentpassword = attendance_random_string();
+                // Note: do not overwrite user-entered value for password with random value, but make sure it is not empty.
+                if (!$sess->studentpassword) {
+                    $sess->studentpassword = attendance_random_string();
+                }
                 $sess->rotateqrcodesecret = attendance_random_string();
             }
             if (!empty($formdata->usedefaultsubnet)) {
@@ -1585,7 +1589,7 @@ function attendance_renderqrcoderotate($session)
         echo html_writer::tag('strong', '', ['id' => 'attendance-pass']);
         echo html_writer::end_tag('details');
     }
-    
+
     echo html_writer::div('', '', ['id' => 'qrcode']); // Div to display qr code.
     echo html_writer::div(get_string('qrcodevalidbefore', 'attendance') . ' ' .
         html_writer::span('0', '', ['id' => 'rotate-time']) . ' '
