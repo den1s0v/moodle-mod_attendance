@@ -1527,35 +1527,65 @@ function attendance_renderqrcoderotate($session)
             'type' => 'text/javascript',
         ]
     );
-    echo html_writer::tag(
-        'style',
-        '.attendance-showpassword {
-            margin-top: 5px;
-            padding: 10px;
-            /* border: 1px solid #ddd;
-            border-radius: 4px; */
-        }
-        .attendance-showpassword summary {
-            /* font-weight: bold; */
-            cursor: pointer;
-        }
-        #attendance-pass {
-            font-family: consolas;
-            font-weight: 800;
-            font-size: 1.5em;
-        }',
-        [
-            'type' => 'text/css',
-        ]
-    );
-    if (1 /* проверка на то, что разрешен показ пароля вместе с QR */) {
+     /* Проверка на то, что разрешен показ пароля вместе с QR. */
+    if (($showpasswordwithqrcode = get_config('attendance', 'showpasswordwithqrcode')) >= 1) {
         // Показать пароль.
-        echo html_writer::start_tag('details', ['open' => 1, 'class' => 'attendance-showpassword']);
-        echo html_writer::tag('summary', /* get_string('showpassword', 'attendance') ?? */ 'или отметьтесь вручную');
-        echo 'используя пароль ';
+        echo html_writer::tag(
+            'style',
+            'details.attendance-showpassword {
+                margin-bottom: 5px;
+                margin-left: 0px;
+                padding-left: 25px; /* Место под иконку */
+                /* padding: 10px; */
+                /* border: 1px solid #ddd;
+                border-radius: 4px; */
+            }
+            details.attendance-showpassword summary {
+                /* font-weight: bold; */
+                cursor: pointer;
+                list-style: none; /* Скрываем стандартный треугольник */
+            }
+            details.attendance-showpassword summary::-webkit-details-marker {
+                display: none;
+            }
+            /* Иконка "глаз закрыт" (по умолчанию) */
+            details summary::before {
+                content: "\f070"; /* Код иконки eye-slash */
+                font-family: "Font Awesome 6 Free";
+                font-weight: 900;
+                position: absolute;
+                margin-left: 15px;
+                left: 0;
+                transition: transform 0.2s;
+                color: grey;
+            }
+            /* Иконка "глаз открыт" (при раскрытии) */
+                details[open] summary::before {
+                content: "\f06e"; /* Код иконки eye */
+                transform: rotate(0deg);
+            }
+            #attendance-pass {
+                font-family: consolas,monospace;
+                font-weight: 800;
+                font-size: 1.5em;
+            }',
+            [
+                'type' => 'text/css',
+            ]
+        );
+        // $summary_text = /* get_string('showpassword', 'attendance') ?? */ 'или отметьтесь вручную';
+        // $summary_text = 'или отметьтесь в ЭИОС, выбрав "Посещаемость"';
+        $summary_text = 'или отметьтесь в курсе по дисциплине в ЭИОС в Посещаемости соответствующего занятия,';
+        // $pass_intro_text = 'используя пароль';
+        $pass_intro_text = 'указав пароль';
+        
+        echo html_writer::start_tag('details', ['class' => 'attendance-showpassword'] + ($showpasswordwithqrcode == 2 ? ['open' => '1'] : []));
+        echo html_writer::tag('summary', $summary_text);
+        echo $pass_intro_text . ' ';  // Note the space before password.
         echo html_writer::tag('strong', '', ['id' => 'attendance-pass']);
         echo html_writer::end_tag('details');
     }
+    
     echo html_writer::div('', '', ['id' => 'qrcode']); // Div to display qr code.
     echo html_writer::div(get_string('qrcodevalidbefore', 'attendance') . ' ' .
         html_writer::span('0', '', ['id' => 'rotate-time']) . ' '

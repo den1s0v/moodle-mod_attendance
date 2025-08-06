@@ -192,6 +192,19 @@ if ($ADMIN->fulltree) {
         $options
     ));
 
+    $options = [
+        0 => get_string('no'/* , 'attendance' */),
+        1 => get_string('showcollapsed', 'attendance'),
+        2 => get_string('resourcedisplayopen'/* , 'attendance' */)
+    ];
+
+    $settings->add(new admin_setting_configselect('attendance/showpasswordwithqrcode',
+        get_string('showpasswordwithqrcode', 'attendance'),
+        get_string('showpasswordwithqrcode_desc', 'attendance'),
+        2,
+        $options
+    ));
+
     $options = attendance_get_sharedipoptions();
     $settings->add(new admin_setting_configselect('attendance/preventsharedip',
         get_string('preventsharedip', 'attendance'),
