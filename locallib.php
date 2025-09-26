@@ -1512,6 +1512,42 @@ function attendance_generate_password()
 }
 
 /**
+ * Return name or names of group(s) involved in session.
+ *
+ * @param stdClass $session
+ */
+function attendance_group_name($session, $courseid = null)
+{
+    $groupinfo = '';
+
+    if (isset($session->groupid)) {
+        if ($session->groupid == 0) {
+            // Сессия для всех групп.
+            $groups = $courseid ? groups_get_all_groups($courseid) : null;
+            if ($groups) {
+                $groupnames = [];
+                foreach ($groups as $group) {
+                    $groupnames[] = $group->name;
+                }
+                $groupinfo = implode(', ', $groupnames);
+            } else {
+                $groupinfo = get_string('allgroups', 'attendance');
+            }
+        } else {
+            // Получаем информацию о конкретной группе.
+            $group = groups_get_group($session->groupid);
+            if ($group) {
+                $groupinfo = $group->name;
+            } else {
+                $groupinfo = get_string('deletedgroup', 'attendance');
+            }
+        }
+    }
+
+    return $groupinfo;
+}
+
+/**
  * Render JS for rotate QR code passwords.
  *
  * @param stdClass $session

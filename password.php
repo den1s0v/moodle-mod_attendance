@@ -56,6 +56,11 @@ $PAGE->set_title(get_string('password', 'attendance'));
 
 echo $OUTPUT->header();
 
+if (1) {
+    // Показать имя группы, для которой создана сессия.
+    echo html_writer::tag('h1', get_string('group') . ': ' . attendance_group_name($session, $cm->course));
+}
+
 $showpassword = (isset($session->studentpassword) && strlen($session->studentpassword) > 0);
 $showqr = (isset($session->includeqrcode) && $session->includeqrcode == 1);
 $rotateqr = (isset($session->rotateqrcode) && $session->rotateqrcode == 1);
