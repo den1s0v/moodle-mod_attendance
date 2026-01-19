@@ -53,6 +53,21 @@ class mod_attendance_mod_form extends moodleform_mod {
 
         $this->standard_intro_elements();
 
+        // Group session limit setting.
+        if (get_config('attendance', 'enablelimitsessionspergroup')) {
+            $limitoptions = [
+                0 => get_string('nolimit', 'attendance'),
+                1 => get_string('maxonesessionpergroup', 'attendance')
+            ];
+            $mform->addElement('select', 'limitsessionspergroup', get_string('limitsessionspergroup', 'attendance'), $limitoptions);
+            $mform->setType('limitsessionspergroup', PARAM_INT);
+            $mform->addHelpButton('limitsessionspergroup', 'limitsessionspergroup', 'attendance');
+            $mform->setDefault('limitsessionspergroup', 1);
+        } else {
+            $mform->addElement('hidden', 'limitsessionspergroup', 0);
+            $mform->setType('limitsessionspergroup', PARAM_INT);
+        }
+
         // Grade settings.
         $this->standard_grading_coursemodule_elements();
 
@@ -68,21 +83,6 @@ class mod_attendance_mod_form extends moodleform_mod {
         } else {
             $mform->addElement('hidden', 'subnet', '');
             $mform->setType('subnet', PARAM_TEXT);
-        }
-
-        // Group session limit setting.
-        if (get_config('attendance', 'enablelimitsessionspergroup')) {
-            $limitoptions = [
-                0 => get_string('nolimit', 'attendance'),
-                1 => get_string('maxonesessionpergroup', 'attendance')
-            ];
-            $mform->addElement('select', 'limitsessionspergroup', get_string('limitsessionspergroup', 'attendance'), $limitoptions);
-            $mform->setType('limitsessionspergroup', PARAM_INT);
-            $mform->addHelpButton('limitsessionspergroup', 'limitsessionspergroup', 'attendance');
-            $mform->setDefault('limitsessionspergroup', 1);
-        } else {
-            $mform->addElement('hidden', 'limitsessionspergroup', 1);
-            $mform->setType('limitsessionspergroup', PARAM_INT);
         }
 
         $this->add_action_buttons();
