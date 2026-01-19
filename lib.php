@@ -134,13 +134,7 @@ function attendance_get_coursemodule_info($coursemodule) {
     foreach ($sessionsbytime as $time => $namesbyid) {
         $names = array_values($namesbyid);
         sort($names, SORT_NATURAL | SORT_FLAG_CASE);
-        // ⌚  U+0231A  WATCH SYMBOL.
-        // 🕙  U+1F559  CLOCK FACE TEN OCLOCK
-        // 🗓  U+1F5D3  SPIRAL CALENDAR PAD.
-        // 📅  U+1F4C5  CALENDAR.
-        // human symbol U+1F46B  MAN: BLOND HAIR.
-        // people symbol 👥 U+1F465  PEOPLE.
-        $datetime = userdate($time, '📅 %m.%d.%Y   🕙 %H:%M');
+        $datetime = userdate($time, '📅 %d.%m.%Y   🕙 %H:%M');
         $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
         $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
             s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . implode(', ', $names) . '</span>';

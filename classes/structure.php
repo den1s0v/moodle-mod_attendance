@@ -538,8 +538,9 @@ class mod_attendance_structure {
      * Clear cached cm_info for this activity.
      */
     private function invalidate_cm_cache(): void {
-        if (!empty($this->cm) && !empty($this->cm->id)) {
-            \cm_info::clear_cache($this->cm->id);
+        if (!empty($this->course) && !empty($this->course->id)) {
+            \course_modinfo::clear_instance_cache($this->course->id);
+            rebuild_course_cache($this->course->id, true);
         }
     }
 
