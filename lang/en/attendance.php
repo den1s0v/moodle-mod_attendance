@@ -274,6 +274,7 @@ $string['group'] = 'Group';
 $string['groups'] = 'Groups';
 $string['groupsession'] = 'Group of students';
 $string['groupsessionsby'] = 'Group sessions by';
+$string['groupsessionslabel'] = 'Group sessions:';
 $string['hiddensessions'] = 'Hidden sessions';
 $string['hiddensessions_help'] = 'Sessions are hidden if they are scheduled before the course start date.
 

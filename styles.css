@@ -343,3 +343,53 @@
     width: 50%;
     text-align: center;
 }
+
+.attendance-session-summary {
+    display: inline-block;
+    font-size: 0.8em;
+    line-height: 1.2;
+    position: relative;
+}
+
+.attendance-session-label {
+    font-weight: 600;
+}
+
+.attendance-session-inline {
+    display: inline;
+}
+
+.attendance-session-ellipsis {
+    margin-left: 0.25em;
+}
+
+.attendance-session-tooltip {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    display: none;
+    left: 0;
+    min-width: 240px;
+    padding: 6px 8px;
+    position: absolute;
+    top: 1.4em;
+    white-space: normal;
+    z-index: 1000;
+}
+
+.attendance-session-summary:hover .attendance-session-tooltip {
+    display: block;
+}
+
+.attendance-session-block {
+    white-space: nowrap;
+}
+
+.attendance-session-past {
+    color: #6c757d;
+}
+
+.attendance-session-future {
+    font-weight: 600;
+}

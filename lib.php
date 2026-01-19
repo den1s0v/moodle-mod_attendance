@@ -57,6 +57,102 @@ function attendance_supports($feature) {
 }
 
 /**
+ * Adds additional information to course module listing.
+ *
+ * @param stdClass $coursemodule
+ * @return cached_cm_info|null
+ */
+function attendance_get_coursemodule_info($coursemodule) {
+    global $DB;
+
+    $sessions = $DB->get_records_select(
+        'attendance_sessions',
+        'attendanceid = :attendanceid AND groupid > 0',
+        ['attendanceid' => $coursemodule->instance],
+        'sessdate ASC',
+        'sessdate, groupid'
+    );
+    if (empty($sessions)) {
+        return null;
+    }
+
+    $groupids = [];
+    foreach ($sessions as $sess) {
+        $groupids[$sess->groupid] = true;
+    }
+    $groupids = array_keys($groupids);
+    $groupnames = [];
+    if (!empty($groupids)) {
+        $groups = $DB->get_records_list('groups', 'id', $groupids, '', 'id,name');
+        $context = context_course::instance($coursemodule->course);
+        foreach ($groupids as $groupid) {
+            if (isset($groups[$groupid])) {
+                $groupnames[$groupid] = format_string($groups[$groupid]->name, true, ['context' => $context]);
+            }
+        }
+    }
+
+    $sessionsbytime = [];
+    foreach ($sessions as $sess) {
+        $time = (int)$sess->sessdate;
+        $groupid = (int)$sess->groupid;
+        if ($groupid <= 0) {
+            continue;
+        }
+        if (!isset($sessionsbytime[$time])) {
+            $sessionsbytime[$time] = [];
+        }
+        $name = $groupnames[$groupid] ?? (get_string('group') . ' ' . $groupid);
+        $sessionsbytime[$time][$groupid] = $name;
+    }
+
+    if (empty($sessionsbytime)) {
+        return null;
+    }
+
+    ksort($sessionsbytime, SORT_NUMERIC);
+    $now = time();
+    $blocks = [];
+    foreach ($sessionsbytime as $time => $namesbyid) {
+        $names = array_values($namesbyid);
+        sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+        $datetime = userdate($time, '%Y.%d.%m %H:%M');
+        $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
+        $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
+            s($datetime) . ' - ' . implode(', ', $names) . '</span>';
+    }
+
+    if (empty($blocks)) {
+        return null;
+    }
+
+    $label = get_string('groupsessionslabel', 'attendance');
+    $inlineblocks = array_slice($blocks, 0, 2);
+    $inlinehtml = implode('<br>', $inlineblocks);
+    $hasmore = count($blocks) > 2;
+    if ($hasmore) {
+        $inlinehtml .= '<span class="attendance-session-ellipsis">...</span>';
+    }
+
+    $tooltiphtml = '';
+    if ($hasmore) {
+        $tooltiphtml = '<span class="attendance-session-tooltip" role="tooltip">' .
+            implode('<br>', $blocks) . '</span>';
+    }
+
+    $html = '<span class="attendance-session-summary">' .
+        '<span class="attendance-session-label">' . s($label) . '</span> ' .
+        '<span class="attendance-session-inline">' . $inlinehtml . '</span>' .
+        $tooltiphtml .
+        '</span>';
+
+    $info = new cached_cm_info();
+    $info->content = $html;
+
+    return $info;
+}
+
+/**
  * Add default set of statuses to the new attendance.
  *
  * @param int $attid - id of attendance instance.
