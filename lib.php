@@ -95,18 +95,18 @@ function attendance_get_coursemodule_info($coursemodule) {
 
     $groupids = array_keys($groupids);
     $groupnames = [];
+    $context = context_course::instance($coursemodule->course);
+    $attendancename = '';
+    if ($attendance = $DB->get_record('attendance', ['id' => $coursemodule->instance], 'id,name')) {
+        $attendancename = format_string($attendance->name, true, ['context' => $context]);
+    }
     if (!empty($groupids)) {
         $groups = $DB->get_records_list('groups', 'id', $groupids, '', 'id,name');
-        $context = context_course::instance($coursemodule->course);
-        $attendancename = format_string($coursemodule->name, true, ['context' => $context]);
         foreach ($groupids as $groupid) {
             if (isset($groups[$groupid])) {
                 $groupnames[$groupid] = format_string($groups[$groupid]->name, true, ['context' => $context]);
             }
         }
-    } else {
-        $context = context_course::instance($coursemodule->course);
-        $attendancename = format_string($coursemodule->name, true, ['context' => $context]);
     }
 
     // Group sessions by start time so simultaneous groups share one entry.
