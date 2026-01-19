@@ -131,10 +131,16 @@ function attendance_get_coursemodule_info($coursemodule) {
     foreach ($sessionsbytime as $time => $namesbyid) {
         $names = array_values($namesbyid);
         sort($names, SORT_NATURAL | SORT_FLAG_CASE);
-        $datetime = userdate($time, '%Y.%d.%m %H:%M');
+        // ⌚  U+0231A  WATCH SYMBOL.
+        // 🕙  U+1F559  CLOCK FACE TEN OCLOCK
+        // 🗓  U+1F5D3  SPIRAL CALENDAR PAD.
+        // 📅  U+1F4C5  CALENDAR.
+        // human symbol U+1F46B  MAN: BLOND HAIR.
+        // people symbol 👥 U+1F465  PEOPLE.
+        $datetime = userdate($time, '📅 %m.%d.%Y   🕙 %H:%M');
         $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
         $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
-            s($datetime) . ' - ' . implode(', ', $names) . '</span>';
+            s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . implode(', ', $names) . '</span>';
     }
 
     if (empty($blocks)) {
@@ -158,7 +164,7 @@ function attendance_get_coursemodule_info($coursemodule) {
 
     // Wrap in a single container to keep the course page compact.
     $html = '<span class="attendance-session-summary">' .
-        '<span class="attendance-session-label">' . s($label) . '</span> ' .
+        // '<span class="attendance-session-label">' . s($label) . '</span> ' .
         '<span class="attendance-session-inline">' . $inlinehtml . '</span>' .
         $tooltiphtml .
         '</span>';

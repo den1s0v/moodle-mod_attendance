@@ -369,13 +369,17 @@
     border-radius: 3px;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     display: none;
-    left: 0;
+    left: 50%;
+    max-height: 70vh;
+    max-width: 80vw;
     min-width: 240px;
+    overflow: auto;
     padding: 6px 8px;
-    position: absolute;
-    top: 1.4em;
+    position: fixed;
+    top: 50%;
+    transform: translate(-50%, -50%);
     white-space: normal;
-    z-index: 1000;
+    z-index: 20000;
 }
 
 .attendance-session-summary:hover .attendance-session-tooltip {
