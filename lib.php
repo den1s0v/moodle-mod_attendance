@@ -57,7 +57,14 @@ function attendance_supports($feature) {
 }
 
 /**
- * Adds additional information to course module listing.
+ * Adds compact group session info to the course module listing.
+ *
+ * This prepares a short, single-block summary for the course page without
+ * expanding the activity height. It lists up to two grouped session entries
+ * inline (YYYY.DD.MM HH:MM - Group1, Group2), sorted from past to future and
+ * grouped by identical start time. When there are more than two entries, the
+ * inline text shows "..." and the full list is available in a CSS-only tooltip.
+ * Past and future entries are marked with CSS classes for visual distinction.
  *
  * @param stdClass $coursemodule
  * @return cached_cm_info|null
@@ -65,6 +72,7 @@ function attendance_supports($feature) {
 function attendance_get_coursemodule_info($coursemodule) {
     global $DB;
 
+    // Load only group sessions, ordered by start time.
     $sessions = $DB->get_records_select(
         'attendance_sessions',
         'attendanceid = :attendanceid AND groupid > 0',
@@ -76,6 +84,7 @@ function attendance_get_coursemodule_info($coursemodule) {
         return null;
     }
 
+    // Resolve group names for display.
     $groupids = [];
     foreach ($sessions as $sess) {
         $groupids[$sess->groupid] = true;
@@ -92,6 +101,7 @@ function attendance_get_coursemodule_info($coursemodule) {
         }
     }
 
+    // Group sessions by start time so simultaneous groups share one entry.
     $sessionsbytime = [];
     foreach ($sessions as $sess) {
         $time = (int)$sess->sessdate;
@@ -110,6 +120,7 @@ function attendance_get_coursemodule_info($coursemodule) {
         return null;
     }
 
+    // Build formatted blocks with past/future styling.
     ksort($sessionsbytime, SORT_NUMERIC);
     $now = time();
     $blocks = [];
@@ -126,6 +137,7 @@ function attendance_get_coursemodule_info($coursemodule) {
         return null;
     }
 
+    // Show up to two blocks inline; overflow goes into tooltip.
     $label = get_string('groupsessionslabel', 'attendance');
     $inlineblocks = array_slice($blocks, 0, 2);
     $inlinehtml = implode('<br>', $inlineblocks);
@@ -140,6 +152,7 @@ function attendance_get_coursemodule_info($coursemodule) {
             implode('<br>', $blocks) . '</span>';
     }
 
+    // Wrap in a single container to keep the course page compact.
     $html = '<span class="attendance-session-summary">' .
         '<span class="attendance-session-label">' . s($label) . '</span> ' .
         '<span class="attendance-session-inline">' . $inlinehtml . '</span>' .
