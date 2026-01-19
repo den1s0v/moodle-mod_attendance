@@ -860,5 +860,31 @@ function xmldb_attendance_upgrade($oldversion = 0) {
         upgrade_mod_savepoint(true, 2023032800, 'attendance');
     }
 
+    if ($oldversion < 2024082501) {
+        // Define field limitsessionspergroup to be added to attendance.
+        $table = new xmldb_table('attendance');
+        $field = new xmldb_field(
+            'limitsessionspergroup',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '1',
+            'showextrauserdetails'
+        );
+
+        // Conditionally launch add field limitsessionspergroup.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Set default value of 1 for all existing activities.
+        $DB->execute("UPDATE {attendance} SET limitsessionspergroup = 1 WHERE limitsessionspergroup IS NULL OR limitsessionspergroup = 0");
+
+        // Attendance savepoint reached.
+        upgrade_mod_savepoint(true, 2024082501, 'attendance');
+    }
+
     return true;
 }

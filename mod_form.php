@@ -70,6 +70,21 @@ class mod_attendance_mod_form extends moodleform_mod {
             $mform->setType('subnet', PARAM_TEXT);
         }
 
+        // Group session limit setting.
+        if (get_config('attendance', 'enablelimitsessionspergroup')) {
+            $limitoptions = [
+                0 => get_string('nolimit', 'attendance'),
+                1 => get_string('maxonesessionpergroup', 'attendance')
+            ];
+            $mform->addElement('select', 'limitsessionspergroup', get_string('limitsessionspergroup', 'attendance'), $limitoptions);
+            $mform->setType('limitsessionspergroup', PARAM_INT);
+            $mform->addHelpButton('limitsessionspergroup', 'limitsessionspergroup', 'attendance');
+            $mform->setDefault('limitsessionspergroup', 1);
+        } else {
+            $mform->addElement('hidden', 'limitsessionspergroup', 1);
+            $mform->setType('limitsessionspergroup', PARAM_INT);
+        }
+
         $this->add_action_buttons();
     }
 }

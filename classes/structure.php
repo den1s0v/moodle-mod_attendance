@@ -90,6 +90,9 @@ class mod_attendance_structure {
     /** @var int Position for the session detail columns related to summary columns.*/
     public $sessiondetailspos;
 
+    /** @var int Limit number of sessions per group (0=no limit, 1=max 1, 2=max 2, etc.) */
+    public $limitsessionspergroup;
+
     /** @var int groupmode  */
     private $groupmode;
 
@@ -477,6 +480,55 @@ class mod_attendance_structure {
      * @param array $sessions
      */
     public function add_sessions($sessions) {
+        global $DB;
+
+        // Check if group session limit is enabled and enforced.
+        $enablelimit = get_config('attendance', 'enablelimitsessionspergroup');
+        $limit = isset($this->limitsessionspergroup) ? $this->limitsessionspergroup : 1;
+
+        if ($enablelimit && $limit > 0) {
+            // Count existing sessions per group for this attendance instance.
+            $existingcounts = [];
+            $sql = "SELECT groupid, COUNT(*) as cnt
+                      FROM {attendance_sessions}
+                     WHERE attendanceid = :attendanceid AND groupid > 0
+                  GROUP BY groupid";
+            $existing = $DB->get_records_sql($sql, ['attendanceid' => $this->id]);
+            foreach ($existing as $record) {
+                $existingcounts[$record->groupid] = $record->cnt;
+            }
+
+            // Count new sessions per group.
+            $newcounts = [];
+            foreach ($sessions as $sess) {
+                $groupid = isset($sess->groupid) ? $sess->groupid : 0;
+                // Only count group sessions (groupid > 0), not common sessions (groupid = 0).
+                if ($groupid > 0) {
+                    if (!isset($newcounts[$groupid])) {
+                        $newcounts[$groupid] = 0;
+                    }
+                    $newcounts[$groupid]++;
+                }
+            }
+
+            // Check if any group would exceed the limit.
+            $violatinggroups = [];
+            foreach ($newcounts as $groupid => $newcount) {
+                $existingcount = isset($existingcounts[$groupid]) ? $existingcounts[$groupid] : 0;
+                if (($existingcount + $newcount) > $limit) {
+                    $groupname = $DB->get_field('groups', 'name', ['id' => $groupid]);
+                    if (!$groupname) {
+                        $groupname = get_string('group') . ' ' . $groupid;
+                    }
+                    $violatinggroups[] = $groupname;
+                }
+            }
+
+            if (!empty($violatinggroups)) {
+                throw new moodle_exception('limitsessionspergroupexceeded', 'attendance', '', implode(', ', $violatinggroups));
+            }
+        }
+
         foreach ($sessions as $sess) {
             $this->add_session($sess);
         }

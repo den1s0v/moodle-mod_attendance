@@ -107,6 +107,13 @@ if ($ADMIN->fulltree) {
         1
     ));
 
+    $settings->add(new admin_setting_configcheckbox(
+        'attendance/enablelimitsessionspergroup',
+        get_string('enablelimitsessionspergroup', 'attendance'),
+        get_string('enablelimitsessionspergroup_desc', 'attendance'),
+        1
+    ));
+
     $options = [
         ATT_VIEW_ALL => get_string('all', 'attendance'),
         ATT_VIEW_ALLPAST => get_string('allpast', 'attendance'),

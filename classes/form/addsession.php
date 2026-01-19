@@ -107,13 +107,51 @@ class addsession extends moodleform {
                 $groups = groups_get_all_groups($course->id, 0, $cm->groupingid);
             }
             if ($groups) {
+                // Check if limit is enabled and get groups with existing sessions.
+                $enablelimit = get_config('attendance', 'enablelimitsessionspergroup');
+                $attendance = $this->_customdata['att'];
+                $limit = isset($attendance->limitsessionspergroup) ? $attendance->limitsessionspergroup : 1;
+                $groupswithsessions = [];
+                
+                if ($enablelimit && $limit > 0) {
+                    $sql = "SELECT groupid, COUNT(*) as cnt
+                              FROM {attendance_sessions}
+                             WHERE attendanceid = :attendanceid AND groupid > 0
+                          GROUP BY groupid";
+                    $existing = $DB->get_records_sql($sql, ['attendanceid' => $attendance->id]);
+                    foreach ($existing as $record) {
+                        if ($record->cnt > 0) {
+                            $groupswithsessions[] = $record->groupid;
+                        }
+                    }
+                }
+
                 $selectgroups = [];
                 foreach ($groups as $group) {
-                    $selectgroups[$group->id] = $group->name;
+                    $groupname = $group->name;
+                    if (in_array($group->id, $groupswithsessions)) {
+                        $groupname .= ' (' . get_string('hassessions', 'attendance') . ')';
+                    }
+                    $selectgroups[$group->id] = $groupname;
                 }
                 $select = &$mform->addElement('select', 'groups', get_string('groups', 'group'), $selectgroups);
                 $select->setMultiple(true);
                 $mform->disabledIf('groups', 'sessiontype', 'eq', mod_attendance_structure::SESSION_COMMON);
+
+                // Show info message about groups with existing sessions.
+                if (!empty($groupswithsessions) && $enablelimit && $limit > 0) {
+                    $groupnames = [];
+                    foreach ($groups as $group) {
+                        if (in_array($group->id, $groupswithsessions)) {
+                            $groupnames[] = $group->name;
+                        }
+                    }
+                    if (!empty($groupnames)) {
+                        $infomessage = get_string('groupswithsessionsinfo', 'attendance', implode(', ', $groupnames));
+                        $mform->addElement('static', 'groupswithsessions', '', $infomessage);
+                        $mform->disabledIf('groupswithsessions', 'sessiontype', 'eq', mod_attendance_structure::SESSION_COMMON);
+                    }
+                }
             } else {
                 if ($groupmode == VISIBLEGROUPS) {
                     $mform->updateElementAttr($radio, ['disabled' => 'disabled']);
@@ -183,6 +221,17 @@ class addsession extends moodleform {
         }
         $mform->addElement('checkbox', 'addmultiply', '', get_string('repeatasfollows', 'attendance'));
         $mform->addHelpButton('addmultiply', 'createmultiplesessions', 'attendance');
+        
+        // Disable addmultiply if group session limit is 1 and session type is GROUP.
+        $enablelimit = get_config('attendance', 'enablelimitsessionspergroup');
+        $attendance = $this->_customdata['att'];
+        $limit = isset($attendance->limitsessionspergroup) ? $attendance->limitsessionspergroup : 1;
+        if ($enablelimit && $limit == 1) {
+            $mform->disabledIf('addmultiply', 'sessiontype', 'eq', mod_attendance_structure::SESSION_GROUP);
+            $mform->disabledIf('sdays', 'sessiontype', 'eq', mod_attendance_structure::SESSION_GROUP);
+            $mform->disabledIf('periodgroup', 'sessiontype', 'eq', mod_attendance_structure::SESSION_GROUP);
+            $mform->disabledIf('sessionenddate', 'sessiontype', 'eq', mod_attendance_structure::SESSION_GROUP);
+        }
 
         $sdays = [];
         if ($CFG->calendar_startwday === '0') { // Week start from sunday.
@@ -386,6 +435,67 @@ class addsession extends moodleform {
 
         if ($data['sessiontype'] == mod_attendance_structure::SESSION_GROUP && empty($data['groups'])) {
             $errors['groups'] = get_string('errorgroupsnotselected', 'attendance');
+        }
+
+        // Validate group session limit.
+        if ($data['sessiontype'] == mod_attendance_structure::SESSION_GROUP && !empty($data['groups'])) {
+            $enablelimit = get_config('attendance', 'enablelimitsessionspergroup');
+            $attendance = $this->_customdata['att'];
+            $limit = isset($attendance->limitsessionspergroup) ? $attendance->limitsessionspergroup : 1;
+            
+            if ($enablelimit && $limit > 0) {
+                // Count how many sessions will be created per group.
+                $addmulti = isset($data['addmultiply']) ? (int)$data['addmultiply'] : 0;
+                $sessionspergroup = 1;
+                if ($addmulti && !empty($data['sdays']) && !empty($data['sessiondate']) && !empty($data['sessionenddate'])) {
+                    // Calculate number of sessions that will be created.
+                    $start = new DateTime(date("Y-m-d", $data['sessiondate']));
+                    $end = new DateTime(date("Y-m-d", $data['sessionenddate']));
+                    $end->add(new DateInterval('P1D'));
+                    $interval = new DateInterval('P1D');
+                    $period = new DatePeriod($start, $interval, $end);
+                    $daysofweek = [0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed", 4 => "Thu", 5 => "Fri", 6 => "Sat"];
+                    $count = 0;
+                    foreach ($period as $date) {
+                        foreach ($data['sdays'] as $name => $value) {
+                            $key = array_search($name, $daysofweek);
+                            if ($date->format("w") == $key) {
+                                $count++;
+                                break;
+                            }
+                        }
+                    }
+                    $sessionspergroup = $count;
+                }
+
+                // Check existing sessions per group.
+                $sql = "SELECT groupid, COUNT(*) as cnt
+                          FROM {attendance_sessions}
+                         WHERE attendanceid = :attendanceid AND groupid > 0
+                      GROUP BY groupid";
+                $existing = $DB->get_records_sql($sql, ['attendanceid' => $attendance->id]);
+                $existingcounts = [];
+                foreach ($existing as $record) {
+                    $existingcounts[$record->groupid] = $record->cnt;
+                }
+
+                // Check if any selected group would exceed the limit.
+                $violatinggroups = [];
+                foreach ($data['groups'] as $groupid) {
+                    $existingcount = isset($existingcounts[$groupid]) ? $existingcounts[$groupid] : 0;
+                    if (($existingcount + $sessionspergroup) > $limit) {
+                        $groupname = $DB->get_field('groups', 'name', ['id' => $groupid]);
+                        if (!$groupname) {
+                            $groupname = get_string('group') . ' ' . $groupid;
+                        }
+                        $violatinggroups[] = $groupname;
+                    }
+                }
+
+                if (!empty($violatinggroups)) {
+                    $errors['groups'] = get_string('limitsessionspergroupexceeded', 'attendance', implode(', ', $violatinggroups));
+                }
+            }
         }
 
         $addmulti = isset($data['addmultiply']) ? (int)$data['addmultiply'] : 0;
