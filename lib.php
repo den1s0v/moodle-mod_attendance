@@ -73,22 +73,26 @@ function attendance_get_coursemodule_info($coursemodule) {
     global $DB;
 
     // Load only group sessions, ordered by start time.
-    $sessions = $DB->get_records_select(
-        'attendance_sessions',
-        'attendanceid = :attendanceid AND groupid > 0',
-        ['attendanceid' => $coursemodule->instance],
-        'sessdate ASC',
-        'sessdate, groupid'
+    $sessions = $DB->get_recordset_sql(
+        "SELECT id, sessdate, groupid
+           FROM {attendance_sessions}
+          WHERE attendanceid = :attendanceid AND groupid > 0
+          ORDER BY sessdate ASC",
+        ['attendanceid' => $coursemodule->instance]
     );
-    if (empty($sessions)) {
+
+    // Resolve group names for display and collect session data.
+    $groupids = [];
+    $sessionrows = [];
+    foreach ($sessions as $sess) {
+        $sessionrows[] = $sess;
+        $groupids[$sess->groupid] = true;
+    }
+    $sessions->close();
+    if (empty($sessionrows)) {
         return null;
     }
 
-    // Resolve group names for display.
-    $groupids = [];
-    foreach ($sessions as $sess) {
-        $groupids[$sess->groupid] = true;
-    }
     $groupids = array_keys($groupids);
     $groupnames = [];
     if (!empty($groupids)) {
@@ -103,7 +107,7 @@ function attendance_get_coursemodule_info($coursemodule) {
 
     // Group sessions by start time so simultaneous groups share one entry.
     $sessionsbytime = [];
-    foreach ($sessions as $sess) {
+    foreach ($sessionrows as $sess) {
         $time = (int)$sess->sessdate;
         $groupid = (int)$sess->groupid;
         if ($groupid <= 0) {
