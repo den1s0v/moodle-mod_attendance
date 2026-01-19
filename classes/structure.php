@@ -535,6 +535,15 @@ class mod_attendance_structure {
     }
 
     /**
+     * Clear cached cm_info for this activity.
+     */
+    private function invalidate_cm_cache(): void {
+        if (!empty($this->cm) && !empty($this->cm->id)) {
+            \cm_info::clear_cache($this->cm->id);
+        }
+    }
+
+    /**
      * Save customfields
      *
      * @param int $sessionid
@@ -632,6 +641,8 @@ class mod_attendance_structure {
         }
         $event->add_record_snapshot('attendance_sessions', $sess);
         $event->trigger();
+
+        $this->invalidate_cm_cache();
 
         return $sess->id;
     }
@@ -752,6 +763,8 @@ class mod_attendance_structure {
         $event->add_record_snapshot('course_modules', $this->cm);
         $event->add_record_snapshot('attendance_sessions', $sess);
         $event->trigger();
+
+        $this->invalidate_cm_cache();
     }
 
     /**
@@ -1428,6 +1441,8 @@ class mod_attendance_structure {
             'other' => ['info' => implode(', ', $sessionsids)]]);
         $event->add_record_snapshot('course_modules', $this->cm);
         $event->trigger();
+
+        $this->invalidate_cm_cache();
     }
 
     /**
@@ -1457,6 +1472,8 @@ class mod_attendance_structure {
             $event->trigger();
         }
         $sessions->close();
+
+        $this->invalidate_cm_cache();
     }
 
     /**
