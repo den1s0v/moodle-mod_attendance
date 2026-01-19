@@ -535,7 +535,12 @@ class mod_attendance_structure {
     }
 
     /**
-     * Clear cached cm_info for this activity.
+     * Refresh course/module caches after session changes.
+     *
+     * Primary goal: force course page listings to pick up newly added/updated
+     * attendance sessions (so summary text isn't stale without manual cache purge).
+     * This helper is intentionally generic and can be reused for other cache
+     * invalidation needs in the future.
      */
     private function invalidate_cm_cache(): void {
         if (!empty($this->course) && !empty($this->course->id)) {
