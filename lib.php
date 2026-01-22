@@ -121,6 +121,8 @@ function attendance_get_coursemodule_info($coursemodule) {
     }
 
     // Build formatted blocks with past/future styling.
+    // Number of groups per line (configurable, can be moved to plugin settings later).
+    $groupsperline = 5;
     $blocks = [];
     if (!empty($sessionsbytime)) {
         ksort($sessionsbytime, SORT_NUMERIC);
@@ -130,8 +132,23 @@ function attendance_get_coursemodule_info($coursemodule) {
             sort($names, SORT_NATURAL | SORT_FLAG_CASE);
             $datetime = userdate($time, '📅 %d.%m.%Y   🕙 %H:%M');
             $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
-            $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
-                s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . implode(', ', $names) . '</span>';
+            
+            // Split groups into chunks of $groupsperline.
+            $groupchunks = array_chunk($names, $groupsperline);
+            $firstchunk = true;
+            foreach ($groupchunks as $chunk) {
+                $groupsstr = implode(', ', $chunk);
+                if ($firstchunk) {
+                    // First line: date/time — groups.
+                    $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
+                        s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . $groupsstr . '</span>';
+                    $firstchunk = false;
+                } else {
+                    // Subsequent lines: indented to align after the dash.
+                    $blocks[] = '<span class="attendance-session-block ' . $class . ' attendance-session-continuation">' .
+                        '👥 ' . $groupsstr . '</span>';
+                }
+            }
         }
     }
 

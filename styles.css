@@ -391,6 +391,12 @@
     white-space: nowrap;
 }
 
+.attendance-session-continuation {
+    display: block;
+    margin-left: 13em;
+    padding-left: 0.5em;
+}
+
 .attendance-session-past {
     color: #6c757d;
 }
