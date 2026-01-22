@@ -382,8 +382,8 @@
     font-style: italic;
 }
 
-/* Show tooltip when hovering over the activity item */
-.activity-item:hover .attendance-session-tooltip {
+/* Show tooltip when hovering over the activity name area (not the whole grid) */
+.activity-name-area:hover ~ .activity-altcontent .attendance-session-tooltip {
     display: block;
 }
 
