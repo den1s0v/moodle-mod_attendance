@@ -372,6 +372,7 @@ $string['noofdayslate'] = 'No of days late';
 $string['noofdayspresent'] = 'No of days present';
 $string['nosessiondayselected'] = 'No Session day selected';
 $string['nosessionexists'] = 'No Session exists for this course';
+$string['nosessions'] = 'No sessions in this attendance';
 $string['nosessionsselected'] = 'No sessions selected';
 $string['notfound'] = 'Attendance activity not found in this course!';
 $string['notifytask'] = 'Send warnings to users';

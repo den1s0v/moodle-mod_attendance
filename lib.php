@@ -89,9 +89,6 @@ function attendance_get_coursemodule_info($coursemodule) {
         $groupids[$sess->groupid] = true;
     }
     $sessions->close();
-    if (empty($sessionrows)) {
-        return null;
-    }
 
     $groupids = array_keys($groupids);
     $groupnames = [];
@@ -123,49 +120,37 @@ function attendance_get_coursemodule_info($coursemodule) {
         $sessionsbytime[$time][$groupid] = $name;
     }
 
-    if (empty($sessionsbytime)) {
-        return null;
-    }
-
     // Build formatted blocks with past/future styling.
-    ksort($sessionsbytime, SORT_NUMERIC);
-    $now = time();
     $blocks = [];
-    foreach ($sessionsbytime as $time => $namesbyid) {
-        $names = array_values($namesbyid);
-        sort($names, SORT_NATURAL | SORT_FLAG_CASE);
-        $datetime = userdate($time, '📅 %d.%m.%Y   🕙 %H:%M');
-        $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
-        $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
-            s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . implode(', ', $names) . '</span>';
+    if (!empty($sessionsbytime)) {
+        ksort($sessionsbytime, SORT_NUMERIC);
+        $now = time();
+        foreach ($sessionsbytime as $time => $namesbyid) {
+            $names = array_values($namesbyid);
+            sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+            $datetime = userdate($time, '📅 %d.%m.%Y   🕙 %H:%M');
+            $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
+            $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
+                s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . implode(', ', $names) . '</span>';
+        }
     }
 
+    // Always show tooltip, even if no sessions.
+    $tooltipcontent = '';
     if (empty($blocks)) {
-        return null;
+        $tooltipcontent = '<span class="attendance-session-empty">' .
+            get_string('nosessions', 'attendance') . '</span>';
+    } else {
+        $tooltipcontent = implode('<br>', $blocks);
     }
 
-    // Show up to two blocks inline; overflow goes into tooltip.
-    $label = get_string('groupsessionslabel', 'attendance');
-    $inlineblocks = array_slice($blocks, 0, 2);
-    $inlinehtml = implode('<br>', $inlineblocks);
-    $hasmore = count($blocks) > 2;
-    if ($hasmore) {
-        $inlinehtml .= '<span class="attendance-session-ellipsis">...</span>';
-    }
-
-    $tooltiphtml = '';
-    if ($hasmore) {
-        $tooltiphtml = '<span class="attendance-session-tooltip" role="tooltip">' .
-            '<span class="attendance-session-title">' . s($attendancename) . '</span><br>' .
-            implode('<br>', $blocks) . '</span>';
-    }
-
-    // Wrap in a single container to keep the course page compact.
-    $html = '<span class="attendance-session-summary">' .
-        // '<span class="attendance-session-label">' . s($label) . '</span> ' .
-        '<span class="attendance-session-inline">' . $inlinehtml . '</span>' .
-        $tooltiphtml .
+    $tooltiphtml = '<span class="attendance-session-tooltip" role="tooltip">' .
+        '<span class="attendance-session-title">' . s($attendancename) . '</span><br>' .
+        $tooltipcontent .
         '</span>';
+
+    // Minimal container - tooltip triggered by link hover via CSS.
+    $html = '<span class="attendance-session-summary">' . $tooltiphtml . '</span>';
 
     $info = new cached_cm_info();
     $info->content = $html;

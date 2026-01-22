@@ -31,4 +31,5 @@ $string['maxonesessionpergroup'] = 'Максимум одно занятие у 
 $string['hassessions'] = 'есть занятия';
 $string['groupswithsessionsinfo'] = 'Группы с существующими занятиями: {$a}';
 $string['groupsessionslabel'] = 'Занятия по группам:';
+$string['nosessions'] = 'В этой посещаемости нет занятий';
 $string['limitsessionspergroupexceeded'] = 'Невозможно создать занятия: следующие группы уже имеют максимально допустимое количество занятий: {$a}';

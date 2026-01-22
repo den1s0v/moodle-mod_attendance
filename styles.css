@@ -346,21 +346,9 @@
 
 .attendance-session-summary {
     display: inline-block;
-    font-size: 0.8em;
-    line-height: 1.2;
-    position: relative;
-}
-
-.attendance-session-label {
-    font-weight: 600;
-}
-
-.attendance-session-inline {
-    display: inline;
-}
-
-.attendance-session-ellipsis {
-    margin-left: 0.25em;
+    width: 0;
+    height: 0;
+    overflow: visible;
 }
 
 .attendance-session-tooltip {
@@ -389,7 +377,13 @@
     margin-bottom: 0.4em;
 }
 
-.attendance-session-summary:hover .attendance-session-tooltip {
+.attendance-session-empty {
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* Show tooltip when hovering over the activity item */
+.activity-item:hover .attendance-session-tooltip {
     display: block;
 }
 
