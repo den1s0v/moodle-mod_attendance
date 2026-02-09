@@ -18,6 +18,7 @@
         <FIELD NAME="showsessiondetails" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Define if session details should be shown in reports."/>
         <FIELD NAME="showextrauserdetails" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Define if extra user details should be shown in reports."/>
         <FIELD NAME="limitsessionspergroup" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Limit number of sessions per group (0=no limit, 1=max 1, 2=max 2, etc.)"/>
+        <FIELD NAME="created_by" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="User id of creator of this attendance instance."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id" COMMENT="Primary key for attendance"/>

@@ -221,7 +221,7 @@ function attendance_add_default_warnings($id) {
  * @return bool|int
  */
 function attendance_add_instance($attendance) {
-    global $DB;
+    global $DB, $USER;
 
     $attendance->timemodified = time();
 
@@ -229,6 +229,15 @@ function attendance_add_instance($attendance) {
     // but we need it in object for grading update.
     if (!isset($attendance->grade)) {
         $attendance->grade = 100;
+    }
+
+    // Store the creator of this attendance instance for analytics.
+    if (!isset($attendance->created_by) || empty($attendance->created_by)) {
+        if (!empty($USER) && !empty($USER->id)) {
+            $attendance->created_by = $USER->id;
+        } else {
+            $attendance->created_by = null;
+        }
     }
 
     $attendance->id = $DB->insert_record('attendance', $attendance);

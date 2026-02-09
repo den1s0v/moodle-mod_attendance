@@ -886,5 +886,28 @@ function xmldb_attendance_upgrade($oldversion = 0) {
         upgrade_mod_savepoint(true, 2024082501, 'attendance');
     }
 
+    if ($oldversion < 2024082901) {
+        // Define field created_by to be added to attendance.
+        $table = new xmldb_table('attendance');
+        $field = new xmldb_field(
+            'created_by',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            null,
+            null,
+            null,
+            'limitsessionspergroup'
+        );
+
+        // Conditionally launch add field created_by.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Attendance savepoint reached.
+        upgrade_mod_savepoint(true, 2024082901, 'attendance');
+    }
+
     return true;
 }
