@@ -169,7 +169,7 @@ function attendance_get_coursemodule_info($coursemodule) {
     }
 
     $creatorhtml = '';
-    if ($creatorlabel !== '') {
+    if ($creatorlabel !== '' && get_config('attendance', 'showcreatorintooltip')) {
         $creatorhtml = '<span class="attendance-session-creator">' . s($creatorlabel) . '</span><br>';
     }
 

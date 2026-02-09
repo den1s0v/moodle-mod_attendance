@@ -160,6 +160,13 @@ if ($ADMIN->fulltree) {
     ));
 
     $settings->add(new admin_setting_configcheckbox(
+        'attendance/showcreatorintooltip',
+        get_string('showcreatorintooltip', 'attendance'),
+        get_string('showcreatorintooltip_desc', 'attendance'),
+        1
+    ));
+
+    $settings->add(new admin_setting_configcheckbox(
         'attendance/enablewarnings',
         get_string('enablewarnings', 'attendance'),
         get_string('enablewarnings_desc', 'attendance'),
