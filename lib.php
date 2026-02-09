@@ -96,7 +96,7 @@ function attendance_get_coursemodule_info($coursemodule) {
     $creatorlabel = '';
     if ($attendance = $DB->get_record('attendance', ['id' => $coursemodule->instance], 'id,name,created_by')) {
         $attendancename = $attendance->name;
-        if (!empty($attendance->created_by)) {
+        if (!empty($attendance->created_by) && get_config('attendance', 'showcreatorintooltip')) {
             if ($creator = $DB->get_record('user', ['id' => $attendance->created_by])) {
                 $creatorname = fullname($creator);
                 $creatorlabel = get_string('createdbyattendance', 'attendance', $creatorname);
