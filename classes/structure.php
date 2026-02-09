@@ -93,6 +93,9 @@ class mod_attendance_structure {
     /** @var int Limit number of sessions per group (0=no limit, 1=max 1, 2=max 2, etc.) */
     public $limitsessionspergroup;
 
+    /** @var int|null User id of creator of this attendance instance. */
+    public $created_by;
+
     /** @var int groupmode  */
     private $groupmode;
 
