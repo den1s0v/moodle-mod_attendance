@@ -93,8 +93,15 @@ function attendance_get_coursemodule_info($coursemodule) {
     $groupids = array_keys($groupids);
     $groupnames = [];
     $attendancename = '';
-    if ($attendance = $DB->get_record('attendance', ['id' => $coursemodule->instance], 'id,name')) {
+    $creatorlabel = '';
+    if ($attendance = $DB->get_record('attendance', ['id' => $coursemodule->instance], 'id,name,created_by')) {
         $attendancename = $attendance->name;
+        if (!empty($attendance->created_by)) {
+            if ($creator = $DB->get_record('user', ['id' => $attendance->created_by])) {
+                $creatorname = fullname($creator);
+                $creatorlabel = get_string('createdbyattendance', 'attendance', $creatorname);
+            }
+        }
     }
     if (!empty($groupids)) {
         $groups = $DB->get_records_list('groups', 'id', $groupids, '', 'id,name');
@@ -161,8 +168,14 @@ function attendance_get_coursemodule_info($coursemodule) {
         $tooltipcontent = implode('<br>', $blocks);
     }
 
+    $creatorhtml = '';
+    if ($creatorlabel !== '') {
+        $creatorhtml = '<span class="attendance-session-creator">' . s($creatorlabel) . '</span><br>';
+    }
+
     $tooltiphtml = '<span class="attendance-session-tooltip" role="tooltip">' .
         '<span class="attendance-session-title">' . s($attendancename) . '</span><br>' .
+        $creatorhtml .
         $tooltipcontent .
         '</span>';
 

@@ -382,6 +382,13 @@
     font-style: italic;
 }
 
+.attendance-session-creator {
+    display: block;
+    color: #6c757d;
+    font-size: 0.9em;
+    margin-bottom: 0.4em;
+}
+
 /* Show tooltip when hovering over the activity name area (not the whole grid) */
 .activity-name-area:hover ~ .activity-altcontent .attendance-session-tooltip {
     display: block;

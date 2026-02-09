@@ -374,6 +374,7 @@ $string['nosessiondayselected'] = 'No Session day selected';
 $string['nosessionexists'] = 'No Session exists for this course';
 $string['nosessions'] = 'No sessions in this attendance';
 $string['nosessionsselected'] = 'No sessions selected';
+$string['createdbyattendance'] = 'Created by: {$a}';
 $string['notfound'] = 'Attendance activity not found in this course!';
 $string['notifytask'] = 'Send warnings to users';
 $string['notmember'] = 'not&nbsp;member';
