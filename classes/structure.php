@@ -572,7 +572,7 @@ class mod_attendance_structure {
      * @return int $sessionid
      */
     public function add_session($sess): int {
-        global $DB;
+        global $DB, $USER;
         $config = get_config('attendance');
 
         $sess->attendanceid = $this->id;
@@ -584,6 +584,16 @@ class mod_attendance_structure {
             // If calendard disabled at site level, don't use it.
             $sess->calendarevent = 0;
         }
+
+        // Store the creator of this session for analytics.
+        if (!isset($sess->createdby) || empty($sess->createdby)) {
+            if (!empty($USER) && !empty($USER->id)) {
+                $sess->createdby = $USER->id;
+            } else {
+                $sess->createdby = null;
+            }
+        }
+
         $sess->id = $DB->insert_record('attendance_sessions', $sess);
         $description = file_save_draft_area_files(
             $sess->descriptionitemid,

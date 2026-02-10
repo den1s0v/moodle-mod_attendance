@@ -55,7 +55,7 @@ class backup_attendance_activity_structure_step extends backup_activity_structur
 
         $sessions = new backup_nested_element('sessions');
         $session  = new backup_nested_element('session', ['id'], [
-            'groupid', 'sessdate', 'duration', 'lasttaken', 'lasttakenby', 'timemodified',
+            'groupid', 'sessdate', 'duration', 'lasttaken', 'lasttakenby', 'createdby', 'timemodified',
             'description', 'descriptionformat', 'studentscanmark', 'allowupdatestatus', 'studentpassword', 'autoassignstatus',
             'subnet', 'automark', 'automarkcompleted', 'statusset', 'absenteereport', 'preventsharedip',
             'preventsharediptime', 'caleventid', 'calendarevent', 'includeqrcode', 'automarkcmid',
@@ -111,6 +111,7 @@ class backup_attendance_activity_structure_step extends backup_activity_structur
         // Id annotations.
         $attendance->annotate_ids('user', 'created_by');
         $session->annotate_ids('user', 'lasttakenby');
+        $session->annotate_ids('user', 'createdby');
         $session->annotate_ids('group', 'groupid');
         $log->annotate_ids('user', 'studentid');
         $log->annotate_ids('user', 'takenby');

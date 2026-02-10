@@ -383,6 +383,7 @@ class mod_attendance_external extends external_api {
                          'duration' => new external_value(PARAM_INT, 'Session duration.'),
                          'lasttaken' => new external_value(PARAM_INT, 'Session last taken time.'),
                          'lasttakenby' => new external_value(PARAM_INT, 'ID of the last user that took this session.'),
+                         'createdby' => new external_value(PARAM_INT, 'ID of the user who created this session.', VALUE_DEFAULT, 0),
                          'timemodified' => new external_value(PARAM_INT, 'Time modified.'),
                          'description' => new external_value(PARAM_RAW, 'Session description.'),
                          'descriptionformat' => new external_value(PARAM_INT, 'Session description format.'),
