@@ -74,7 +74,7 @@ function attendance_get_coursemodule_info($coursemodule) {
 
     // Load only group sessions, ordered by start time.
     $sessions = $DB->get_recordset_sql(
-        "SELECT id, sessdate, groupid
+        "SELECT id, sessdate, groupid, createdby
            FROM {attendance_sessions}
           WHERE attendanceid = :attendanceid AND groupid > 0
           ORDER BY sessdate ASC",
@@ -84,9 +84,15 @@ function attendance_get_coursemodule_info($coursemodule) {
     // Resolve group names for display and collect session data.
     $groupids = [];
     $sessionrows = [];
+    $creatorids = [];
     foreach ($sessions as $sess) {
         $sessionrows[] = $sess;
-        $groupids[$sess->groupid] = true;
+        if (!empty($sess->groupid)) {
+            $groupids[$sess->groupid] = true;
+        }
+        if (!empty($sess->createdby)) {
+            $creatorids[$sess->createdby] = true;
+        }
     }
     $sessions->close();
 
@@ -112,8 +118,15 @@ function attendance_get_coursemodule_info($coursemodule) {
         }
     }
 
+    // Preload session creators.
+    $creatorusers = [];
+    if (!empty($creatorids)) {
+        $creatorusers = $DB->get_records_list('user', 'id', array_keys($creatorids));
+    }
+
     // Group sessions by start time so simultaneous groups share one entry.
     $sessionsbytime = [];
+    $sessioncreatorsbytime = [];
     foreach ($sessionrows as $sess) {
         $time = (int)$sess->sessdate;
         $groupid = (int)$sess->groupid;
@@ -125,12 +138,18 @@ function attendance_get_coursemodule_info($coursemodule) {
         }
         $name = $groupnames[$groupid] ?? (get_string('group') . ' ' . $groupid);
         $sessionsbytime[$time][$groupid] = $name;
+
+        // Store creator name per time slot (first non-empty wins).
+        if (!isset($sessioncreatorsbytime[$time]) && !empty($sess->createdby) && isset($creatorusers[$sess->createdby])) {
+            $sessioncreatorsbytime[$time] = fullname($creatorusers[$sess->createdby]);
+        }
     }
 
     // Build formatted blocks with past/future styling.
     // Number of groups per line (configurable, can be moved to plugin settings later).
     $groupsperline = 5;
     $blocks = [];
+    $showsessioncreator = get_config('attendance', 'showsessioncreatorintooltip');
     if (!empty($sessionsbytime)) {
         ksort($sessionsbytime, SORT_NUMERIC);
         $now = time();
@@ -139,6 +158,8 @@ function attendance_get_coursemodule_info($coursemodule) {
             sort($names, SORT_NATURAL | SORT_FLAG_CASE);
             $datetime = userdate($time, '📅 %d.%m.%Y   🕙 %H:%M');
             $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
+
+            $teachername = $sessioncreatorsbytime[$time] ?? '';
             
             // Split groups into chunks of $groupsperline.
             $groupchunks = array_chunk($names, $groupsperline);
@@ -146,9 +167,13 @@ function attendance_get_coursemodule_info($coursemodule) {
             foreach ($groupchunks as $chunk) {
                 $groupsstr = implode(', ', $chunk);
                 if ($firstchunk) {
-                    // First line: date/time — groups.
+                    // First line: date/time [teacher] — groups.
+                    $teacherpart = '';
+                    if ($showsessioncreator && $teachername !== '') {
+                        $teacherpart = ' &nbsp;&nbsp; ' . s($teachername) . ' ';
+                    }
                     $blocks[] = '<span class="attendance-session-block ' . $class . '">' .
-                        s($datetime) . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . $groupsstr . '</span>';
+                        s($datetime) . $teacherpart . ' &nbsp;&nbsp; — &nbsp;&nbsp; 👥 ' . $groupsstr . '</span>';
                     $firstchunk = false;
                 } else {
                     // Subsequent lines: indented to align after the dash.
