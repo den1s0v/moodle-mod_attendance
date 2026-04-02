@@ -174,6 +174,13 @@ if ($ADMIN->fulltree) {
     ));
 
     $settings->add(new admin_setting_configcheckbox(
+        'attendance/enablestudentgroupfilterintooltip',
+        get_string('enablestudentgroupfilterintooltip', 'attendance'),
+        get_string('enablestudentgroupfilterintooltip_desc', 'attendance'),
+        1
+    ));
+
+    $settings->add(new admin_setting_configcheckbox(
         'attendance/enablewarnings',
         get_string('enablewarnings', 'attendance'),
         get_string('enablewarnings_desc', 'attendance'),

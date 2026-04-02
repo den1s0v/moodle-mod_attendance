@@ -57,63 +57,56 @@ function attendance_supports($feature) {
 }
 
 /**
- * Adds compact group session info to the course module listing.
+ * Collects attendance tooltip data.
  *
- * This prepares a short, single-block summary for the course page without
- * expanding the activity height. It lists up to two grouped session entries
- * inline (YYYY.DD.MM HH:MM - Group1, Group2), sorted from past to future and
- * grouped by identical start time. When there are more than two entries, the
- * inline text shows "..." and the full list is available in a CSS-only tooltip.
- * Past and future entries are marked with CSS classes for visual distinction.
- *
- * @param stdClass $coursemodule
- * @return cached_cm_info|null
+ * @param int $attendanceid
+ * @param int[]|null $allowedgroupids If null, includes all groups. If array, only these group ids are included.
+ * @return array
  */
-function attendance_get_coursemodule_info($coursemodule) {
+function attendance_get_tooltip_data(int $attendanceid, ?array $allowedgroupids = null): array {
     global $DB;
 
-    // Load only group sessions, ordered by start time.
+    $groupfilter = '';
+    $params = ['attendanceid' => $attendanceid];
+    if ($allowedgroupids !== null) {
+        $allowedgroupids = array_values(array_unique(array_map('intval', $allowedgroupids)));
+        if (empty($allowedgroupids)) {
+            $groupfilter = ' AND 1 = 0';
+        } else {
+            [$insql, $inparams] = $DB->get_in_or_equal($allowedgroupids, SQL_PARAMS_NAMED, 'gid');
+            $groupfilter = " AND s.groupid $insql";
+            $params = array_merge($params, $inparams);
+        }
+    }
+
+    // Load sessions for groups that still exist.
     $sessions = $DB->get_recordset_sql(
-        "SELECT id, sessdate, groupid, createdby
-           FROM {attendance_sessions}
-          WHERE attendanceid = :attendanceid AND groupid > 0
-          ORDER BY sessdate ASC",
-        ['attendanceid' => $coursemodule->instance]
+        "SELECT s.id, s.sessdate, s.groupid, s.createdby, g.name AS groupname
+           FROM {attendance_sessions} s
+           JOIN {groups} g ON g.id = s.groupid
+          WHERE s.attendanceid = :attendanceid AND s.groupid > 0 $groupfilter
+          ORDER BY s.sessdate ASC",
+        $params
     );
 
-    // Resolve group names for display and collect session data.
-    $groupids = [];
     $sessionrows = [];
     $creatorids = [];
     foreach ($sessions as $sess) {
         $sessionrows[] = $sess;
-        if (!empty($sess->groupid)) {
-            $groupids[$sess->groupid] = true;
-        }
         if (!empty($sess->createdby)) {
             $creatorids[$sess->createdby] = true;
         }
     }
     $sessions->close();
 
-    $groupids = array_keys($groupids);
-    $groupnames = [];
     $attendancename = '';
     $creatorlabel = '';
-    if ($attendance = $DB->get_record('attendance', ['id' => $coursemodule->instance], 'id,name,created_by')) {
+    if ($attendance = $DB->get_record('attendance', ['id' => $attendanceid], 'id,name,created_by')) {
         $attendancename = $attendance->name;
         if (!empty($attendance->created_by) && get_config('attendance', 'showcreatorintooltip')) {
             if ($creator = $DB->get_record('user', ['id' => $attendance->created_by])) {
                 $creatorname = fullname($creator);
                 $creatorlabel = get_string('createdbyattendance', 'attendance', $creatorname);
-            }
-        }
-    }
-    if (!empty($groupids)) {
-        $groups = $DB->get_records_list('groups', 'id', $groupids, '', 'id,name');
-        foreach ($groupids as $groupid) {
-            if (isset($groups[$groupid])) {
-                $groupnames[$groupid] = $groups[$groupid]->name;
             }
         }
     }
@@ -130,14 +123,13 @@ function attendance_get_coursemodule_info($coursemodule) {
     foreach ($sessionrows as $sess) {
         $time = (int)$sess->sessdate;
         $groupid = (int)$sess->groupid;
-        if ($groupid <= 0) {
+        if ($groupid <= 0 || $sess->groupname === null || $sess->groupname === '') {
             continue;
         }
         if (!isset($sessionsbytime[$time])) {
             $sessionsbytime[$time] = [];
         }
-        $name = $groupnames[$groupid] ?? (get_string('group') . ' ' . $groupid);
-        $sessionsbytime[$time][$groupid] = $name;
+        $sessionsbytime[$time][$groupid] = $sess->groupname;
 
         // Store creator name per time slot (first non-empty wins).
         if (!isset($sessioncreatorsbytime[$time]) && !empty($sess->createdby) && isset($creatorusers[$sess->createdby])) {
@@ -145,6 +137,24 @@ function attendance_get_coursemodule_info($coursemodule) {
         }
     }
 
+    return [
+        'attendancename' => $attendancename,
+        'creatorlabel' => $creatorlabel,
+        'sessionsbytime' => $sessionsbytime,
+        'sessioncreatorsbytime' => $sessioncreatorsbytime,
+    ];
+}
+
+/**
+ * Builds attendance tooltip HTML for course module listing.
+ *
+ * @param string $attendancename
+ * @param string $creatorlabel
+ * @param array $sessionsbytime
+ * @param array $sessioncreatorsbytime
+ * @return string
+ */
+function attendance_build_tooltip_html(string $attendancename, string $creatorlabel, array $sessionsbytime, array $sessioncreatorsbytime): string {
     // Build formatted blocks with past/future styling.
     // Number of groups per line (configurable, can be moved to plugin settings later).
     $groupsperline = 5;
@@ -160,12 +170,12 @@ function attendance_get_coursemodule_info($coursemodule) {
             $class = ($time < $now) ? 'attendance-session-past' : 'attendance-session-future';
 
             $teachername = $sessioncreatorsbytime[$time] ?? '';
-            
+
             // Split groups into chunks of $groupsperline.
             $groupchunks = array_chunk($names, $groupsperline);
             $firstchunk = true;
             foreach ($groupchunks as $chunk) {
-                $groupsstr = implode(', ', $chunk);
+                $groupsstr = implode(', ', array_map('s', $chunk));
                 if ($firstchunk) {
                     // First line: date/time [teacher] — groups.
                     $teacherpart = '';
@@ -205,12 +215,89 @@ function attendance_get_coursemodule_info($coursemodule) {
         '</span>';
 
     // Minimal container - tooltip triggered by link hover via CSS.
-    $html = '<span class="attendance-session-summary">' . $tooltiphtml . '</span>';
+    return '<span class="attendance-session-summary">' . $tooltiphtml . '</span>';
+}
+
+/**
+ * Adds compact group session info to the course module listing.
+ *
+ * This prepares a short, single-block summary for the course page without
+ * expanding the activity height. It lists up to two grouped session entries
+ * inline (YYYY.DD.MM HH:MM - Group1, Group2), sorted from past to future and
+ * grouped by identical start time. When there are more than two entries, the
+ * inline text shows "..." and the full list is available in a CSS-only tooltip.
+ * Past and future entries are marked with CSS classes for visual distinction.
+ *
+ * @param stdClass $coursemodule
+ * @return cached_cm_info|null
+ */
+function attendance_get_coursemodule_info($coursemodule) {
+    $tooltipdata = attendance_get_tooltip_data((int)$coursemodule->instance);
+    $html = attendance_build_tooltip_html(
+        $tooltipdata['attendancename'],
+        $tooltipdata['creatorlabel'],
+        $tooltipdata['sessionsbytime'],
+        $tooltipdata['sessioncreatorsbytime']
+    );
 
     $info = new cached_cm_info();
     $info->content = $html;
 
     return $info;
+}
+
+/**
+ * Adjusts cached course-module content per user.
+ *
+ * Students in separate groups mode only see their own groups in the tooltip.
+ * In no groups / visible groups mode everyone sees all groups.
+ *
+ * @param cm_info $cm
+ */
+function attendance_cm_info_view(cm_info $cm) {
+    global $USER;
+
+    if (!$cm->uservisible) {
+        return;
+    }
+
+    $studentfilteringenabled = get_config('attendance', 'enablestudentgroupfilterintooltip');
+    // get_config() returns false when the setting is missing (for example right after deploy,
+    // before admin settings are saved). Keep default behavior as enabled in that case.
+    if ($studentfilteringenabled === false) {
+        $studentfilteringenabled = 1;
+    }
+    if (empty($studentfilteringenabled)) {
+        return;
+    }
+
+    $groupmode = groups_get_activity_groupmode($cm, $cm->get_course());
+    if ($groupmode !== SEPARATEGROUPS) {
+        return;
+    }
+
+    // Teachers (and roles with takeattendances capability) should see all groups,
+    // so no per-student filtering is applied for them.
+    if (has_capability('mod/attendance:takeattendances', $cm->context, $USER)) {
+        return;
+    }
+
+    $usergroupsbygrouping = groups_get_user_groups($cm->course, $USER->id);
+    $allowedgroupids = [];
+    foreach ($usergroupsbygrouping as $groupids) {
+        foreach ($groupids as $groupid) {
+            $allowedgroupids[] = (int)$groupid;
+        }
+    }
+    $allowedgroupids = array_values(array_unique($allowedgroupids));
+
+    $tooltipdata = attendance_get_tooltip_data((int)$cm->instance, $allowedgroupids);
+    $cm->set_content(attendance_build_tooltip_html(
+        $tooltipdata['attendancename'],
+        $tooltipdata['creatorlabel'],
+        $tooltipdata['sessionsbytime'],
+        $tooltipdata['sessioncreatorsbytime']
+    ));
 }
 
 /**
