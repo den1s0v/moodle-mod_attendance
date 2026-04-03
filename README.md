@@ -37,3 +37,17 @@ Behavior:
 - access is restricted to site admins only
 - opening the URL does not run recalculation
 - recalculation starts only after explicit confirmation (POST + sesskey)
+
+## Business rules for overlapping group sessions
+
+When one student has multiple group sessions in the same timeslot (same date/time and duration),
+attendance grading treats them as one logical session.
+
+Timeslot score selection rule:
+- if all overlapping sessions have `autoassignstatus = 1`, use the maximum status grade
+- if all overlapping sessions have `autoassignstatus = 0`, use the minimum status grade
+- if overlapping sessions have mixed `autoassignstatus` values, use the maximum status grade
+
+Historical consistency rule:
+- summary and grade calculations are based on recorded `attendance_log` data
+- current `groups_members` state is not used to re-filter historical taken-session grades
