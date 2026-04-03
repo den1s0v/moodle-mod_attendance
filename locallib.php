@@ -1110,11 +1110,8 @@ function attendance_course_users_points($courseids = [], $orderby = '')
 
     $where = '';
     $params = [];
-    $where .= ' AND ats.sessdate < :enddate ';
+    $where .= ' AND slot.sessdate < :enddate ';
     $params['enddate'] = time();
-
-    $joingroup = 'LEFT JOIN {groups_members} gm ON (gm.userid = atl.studentid AND gm.groupid = ats.groupid)';
-    $where .= ' AND (ats.groupid = 0 or gm.id is NOT NULL)';
 
     if (!empty($courseids)) {
         [$insql, $inparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED);
@@ -1123,25 +1120,36 @@ function attendance_course_users_points($courseids = [], $orderby = '')
     }
 
     $sql = "SELECT courseid, coursename, sum(points) / sum(maxpoints) as percentage FROM (
-SELECT a.id, a.course as courseid, c.fullname as coursename, atl.studentid AS userid, COUNT(DISTINCT ats.id) AS numtakensessions,
-                        SUM(stg.grade) AS points, SUM(stm.maxgrade) AS maxpoints
-                   FROM {attendance_sessions} ats
-                   JOIN {attendance} a ON a.id = ats.attendanceid
+SELECT a.id, a.course as courseid, c.fullname as coursename, slot.userid AS userid, COUNT(1) AS numtakensessions,
+                        SUM(slot.slotgrade) AS points, SUM(slot.slotmaxgrade) AS maxpoints
+                   FROM (
+                        SELECT ats.attendanceid,
+                               ats.sessdate,
+                               atl.studentid AS userid,
+                               CASE
+                                   WHEN MIN(ats.autoassignstatus) = 0 AND MAX(ats.autoassignstatus) = 0
+                                       THEN MIN(stg.grade)
+                                   ELSE MAX(stg.grade)
+                               END AS slotgrade,
+                               MAX(stm.maxgrade) AS slotmaxgrade
+                          FROM {attendance_sessions} ats
+                          JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
+                          JOIN {attendance_statuses} stg ON (stg.id = atl.statusid AND stg.deleted = 0 AND stg.visible = 1)
+                          JOIN (SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
+                                  FROM {attendance_statuses}
+                                 WHERE deleted = 0
+                                   AND visible = 1
+                              GROUP BY attendanceid, setnumber) stm
+                            ON (stm.setnumber = ats.statusset AND stm.attendanceid = ats.attendanceid)
+                         WHERE ats.lasttaken != 0
+                      GROUP BY ats.attendanceid, ats.sessdate, ats.duration, atl.studentid
+                   ) slot
+                   JOIN {attendance} a ON a.id = slot.attendanceid
                    JOIN {course} c ON c.id = a.course
-                   JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
-                   JOIN {attendance_statuses} stg ON (stg.id = atl.statusid AND stg.deleted = 0 AND stg.visible = 1)
-                   JOIN (SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
-                           FROM {attendance_statuses}
-                          WHERE deleted = 0
-                            AND visible = 1
-                         GROUP BY attendanceid, setnumber) stm
-                     ON (stm.setnumber = ats.statusset AND stm.attendanceid = ats.attendanceid)
-                  {$joingroup}
-                  WHERE ats.sessdate >= c.startdate
-                    AND ats.lasttaken != 0
-                    AND stm.maxgrade > 0
+                  WHERE slot.sessdate >= c.startdate
+                    AND slot.slotmaxgrade > 0
                     {$where}
-                GROUP BY a.id, a.course, c.fullname, atl.studentid
+                GROUP BY a.id, a.course, c.fullname, slot.userid
                 ) p GROUP by courseid, coursename {$orderby}";
 
     return $DB->get_records_sql($sql, $params);
@@ -1159,8 +1167,7 @@ function attendance_get_users_to_notify($courseids = [], $orderby = '', $allforn
 {
     global $DB, $CFG;
 
-    $joingroup = 'LEFT JOIN {groups_members} gm ON (gm.userid = atl.studentid AND gm.groupid = ats.groupid)';
-    $where = ' AND (ats.groupid = 0 or gm.id is NOT NULL)';
+    $where = '';
     $having = '';
     $params = [];
 
@@ -1187,39 +1194,53 @@ function attendance_get_users_to_notify($courseids = [], $orderby = '', $allforn
         }
     }
 
-    $idfield = $DB->sql_concat('cm.id', 'atl.studentid', 'n.id');
+    $idfield = $DB->sql_concat('cm.id', 'slot.userid', 'n.id');
     $params['yesterday'] = time() - DAYSECS;
     $sql = "SELECT {$idfield} as uniqueid, a.id as aid, {$unames2} a.name as aname, cm.id as cmid, c.id as courseid,
-                    c.fullname as coursename, atl.studentid AS userid, n.id as notifyid, n.warningpercent, n.emailsubject,
+                    c.fullname as coursename, slot.userid AS userid, n.id as notifyid, n.warningpercent, n.emailsubject,
                     n.emailcontent, n.emailcontentformat, n.emailuser, n.thirdpartyemails, n.warnafter, n.maxwarn,
-                     COUNT(DISTINCT ats.id) AS numtakensessions, SUM(stg.grade) AS points, SUM(stm.maxgrade) AS maxpoints,
+                     COUNT(1) AS numtakensessions, SUM(slot.slotgrade) AS points, SUM(slot.slotmaxgrade) AS maxpoints,
                       COUNT(DISTINCT ns.id) as nscount, MAX(ns.timesent) as timesent,
-                      SUM(stg.grade) / SUM(stm.maxgrade) AS percent
-                   FROM {attendance_sessions} ats
-                   JOIN {attendance} a ON a.id = ats.attendanceid
+                      SUM(slot.slotgrade) / SUM(slot.slotmaxgrade) AS percent
+                   FROM (
+                        SELECT ats.attendanceid,
+                               ats.sessdate,
+                               ats.duration,
+                               atl.studentid AS userid,
+                               CASE
+                                   WHEN MIN(ats.autoassignstatus) = 0 AND MAX(ats.autoassignstatus) = 0
+                                       THEN MIN(stg.grade)
+                                   ELSE MAX(stg.grade)
+                               END AS slotgrade,
+                               MAX(stm.maxgrade) AS slotmaxgrade
+                          FROM {attendance_sessions} ats
+                          JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
+                          JOIN {attendance_statuses} stg ON (stg.id = atl.statusid AND stg.deleted = 0 AND stg.visible = 1)
+                          JOIN (SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
+                                  FROM {attendance_statuses}
+                                 WHERE deleted = 0
+                                   AND visible = 1
+                              GROUP BY attendanceid, setnumber) stm
+                            ON (stm.setnumber = ats.statusset AND stm.attendanceid = ats.attendanceid)
+                         WHERE ats.absenteereport = 1
+                           AND ats.attendanceid IN (SELECT distinct attendanceid
+                                                      FROM {attendance_sessions}
+                                                     WHERE sessdate > :yesterday)
+                      GROUP BY ats.attendanceid, ats.sessdate, ats.duration, atl.studentid
+                   ) slot
+                   JOIN {attendance} a ON a.id = slot.attendanceid
                    JOIN {course_modules} cm ON cm.instance = a.id
                    JOIN {course} c on c.id = cm.course
                    JOIN {modules} md ON md.id = cm.module AND md.name = 'attendance'
-                   JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
-                   JOIN {user} u ON (u.id = atl.studentid)
-                   JOIN {attendance_statuses} stg ON (stg.id = atl.statusid AND stg.deleted = 0 AND stg.visible = 1)
+                   JOIN {user} u ON (u.id = slot.userid)
                    JOIN {attendance_warning} n ON n.idnumber = a.id
-                   LEFT JOIN {attendance_warning_done} ns ON ns.notifyid = n.id AND ns.userid = atl.studentid
-                   JOIN (SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
-                           FROM {attendance_statuses}
-                          WHERE deleted = 0
-                            AND visible = 1
-                         GROUP BY attendanceid, setnumber) stm
-                     ON (stm.setnumber = ats.statusset AND stm.attendanceid = ats.attendanceid)
-                  {$joingroup}
-                  WHERE ats.absenteereport = 1 AND ats.attendanceid IN (SELECT distinct attendanceid
-                                                                          FROM {attendance_sessions}
-                                                                         WHERE sessdate > :yesterday)
+                   LEFT JOIN {attendance_warning_done} ns ON ns.notifyid = n.id AND ns.userid = slot.userid
+                  WHERE slot.slotmaxgrade > 0
                   {$where}
-                GROUP BY uniqueid, a.id, a.name, a.course, c.fullname, atl.studentid, n.id, n.warningpercent,
+                GROUP BY uniqueid, a.id, a.name, a.course, c.fullname, slot.userid, n.id, n.warningpercent,
                          n.emailsubject, n.emailcontent, n.emailcontentformat, n.warnafter, n.maxwarn,
                          n.emailuser, n.thirdpartyemails, cm.id, c.id, {$unames2} ns.userid
-                HAVING n.warnafter <= COUNT(DISTINCT ats.id) AND n.warningpercent > ((SUM(stg.grade) / SUM(stm.maxgrade)) * 100)
+                HAVING n.warnafter <= COUNT(1) AND n.warningpercent > ((SUM(slot.slotgrade) / SUM(slot.slotmaxgrade)) * 100)
                 {$having}
                       {$orderby}";
 

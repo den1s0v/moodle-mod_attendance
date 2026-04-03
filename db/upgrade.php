@@ -932,5 +932,10 @@ function xmldb_attendance_upgrade($oldversion = 0) {
         upgrade_mod_savepoint(true, 2024083001, 'attendance');
     }
 
+    if ($oldversion < 2024083102) {
+        // Savepoint for summary logic update and manual web recalculation entrypoint.
+        upgrade_mod_savepoint(true, 2024083102, 'attendance');
+    }
+
     return true;
 }

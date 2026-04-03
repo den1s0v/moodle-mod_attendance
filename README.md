@@ -26,3 +26,14 @@ Sessions can be configured to allow students to record their own attendance and 
 
 # DOCUMENTATION
 https://docs.moodle.org/en/Attendance_activity
+
+## Maintenance helper
+
+Site administrators can run a protected recalculation helper from:
+
+`/mod/attendance/recalculate.php`
+
+Behavior:
+- access is restricted to site admins only
+- opening the URL does not run recalculation
+- recalculation starts only after explicit confirmation (POST + sesskey)

@@ -236,32 +236,41 @@ class mod_attendance_summary {
             $params['enddate'] = $enddate;
         }
 
-        $joingroup = '';
-        if ($this->with_groups()) {
-            $joingroup = 'LEFT JOIN {groups_members} gm ON (gm.userid = atl.studentid AND gm.groupid = ats.groupid)';
-            $where .= ' AND (ats.groupid = 0 or gm.id is NOT NULL)';
-        } else {
-            $where .= ' AND ats.groupid = 0';
-        }
-
-        $sql = " SELECT atl.studentid AS userid, COUNT(DISTINCT ats.id) AS numtakensessions,
-                        SUM(stg.grade) AS points, SUM(stm.maxgrade) AS maxpoints
-                   FROM {attendance_sessions} ats
-                   JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
-                   JOIN {attendance_statuses} stg ON (stg.id = atl.statusid AND stg.deleted = 0 AND stg.visible = 1)
-                   JOIN (SELECT setnumber, MAX(grade) AS maxgrade
-                           FROM {attendance_statuses}
-                          WHERE attendanceid = :attid2
-                            AND deleted = 0
-                            AND visible = 1
-                         GROUP BY setnumber) stm
-                     ON (stm.setnumber = ats.statusset)
-                   {$joingroup}
-                  WHERE ats.attendanceid = :attid
-                    AND ats.sessdate >= :cstartdate
-                    AND ats.lasttaken != 0
-                    {$where}
-                GROUP BY atl.studentid";
+        // Group sessions by student + timeslot and collapse parallel groups into one logical session.
+        // When all sessions in a timeslot have autoassignstatus=0, the "best" outcome is the minimum grade.
+        // Otherwise (all=1 or mixed values), the "best" outcome is the maximum grade.
+        $sql = "SELECT slot.userid,
+                       COUNT(1) AS numtakensessions,
+                       SUM(slot.slotgrade) AS points,
+                       SUM(slot.slotmaxgrade) AS maxpoints
+                  FROM (
+                        SELECT atl.studentid AS userid,
+                               ats.sessdate,
+                               ats.duration,
+                               CASE
+                                   WHEN MIN(ats.autoassignstatus) = 0 AND MAX(ats.autoassignstatus) = 0
+                                       THEN MIN(stg.grade)
+                                   ELSE MAX(stg.grade)
+                               END AS slotgrade,
+                               MAX(stm.maxgrade) AS slotmaxgrade
+                          FROM {attendance_sessions} ats
+                          JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
+                          JOIN {attendance_statuses} stg
+                            ON (stg.id = atl.statusid AND stg.deleted = 0 AND stg.visible = 1)
+                          JOIN (SELECT setnumber, MAX(grade) AS maxgrade
+                                  FROM {attendance_statuses}
+                                 WHERE attendanceid = :attid2
+                                   AND deleted = 0
+                                   AND visible = 1
+                              GROUP BY setnumber) stm
+                            ON (stm.setnumber = ats.statusset)
+                         WHERE ats.attendanceid = :attid
+                           AND ats.sessdate >= :cstartdate
+                           AND ats.lasttaken != 0
+                           {$where}
+                      GROUP BY atl.studentid, ats.sessdate, ats.duration
+                 ) slot
+              GROUP BY slot.userid";
         $this->userspoints = $DB->get_records_sql($sql, $params);
     }
 
@@ -299,33 +308,78 @@ class mod_attendance_summary {
             $params['enddate'] = $enddate;
         }
 
-        if ($this->with_groups()) {
-            $joingroup = 'LEFT JOIN {groups_members} gm ON (gm.userid = atl.studentid AND gm.groupid = ats.groupid)';
-            $where .= ' AND (ats.groupid = 0 or gm.id is NOT NULL)';
-        } else {
-            $joingroup = '';
-            $where .= ' AND ats.groupid = 0';
-        }
-
-        $sql = "SELECT atl.studentid AS userid, sts.setnumber, sts.acronym, COUNT(*) AS numtakensessions
+        // Build acronym summary from timeslot-collapsed results so parallel group sessions count once.
+        $sql = "SELECT atl.studentid AS userid,
+                       ats.sessdate,
+                       ats.duration,
+                       ats.autoassignstatus,
+                       sts.setnumber,
+                       sts.acronym,
+                       sts.grade
                   FROM {attendance_sessions} ats
                   JOIN {attendance_log} atl ON (atl.sessionid = ats.id)
                   JOIN {attendance_statuses} sts
                     ON (sts.attendanceid = ats.attendanceid AND
                         sts.id = atl.statusid AND
                         sts.deleted = 0 AND sts.visible = 1)
-                  {$joingroup}
                  WHERE ats.attendanceid = :attid
                    AND ats.sessdate >= :cstartdate
                    AND ats.lasttaken != 0
                    {$where}
-              GROUP BY atl.studentid, sts.setnumber, sts.acronym";
+              ORDER BY atl.studentid, ats.sessdate, ats.duration";
+
         $this->userstakensessionsbyacronym = [];
         $records = $DB->get_recordset_sql($sql, $params);
+        $slots = [];
         foreach ($records as $rec) {
-            $this->userstakensessionsbyacronym[$rec->userid][$rec->setnumber][$rec->acronym] = $rec->numtakensessions;
+            $slotkey = $rec->userid . ':' . $rec->sessdate . ':' . $rec->duration;
+            if (!isset($slots[$slotkey])) {
+                $slots[$slotkey] = (object)[
+                    'userid' => $rec->userid,
+                    'minauto' => (int)$rec->autoassignstatus,
+                    'maxauto' => (int)$rec->autoassignstatus,
+                    'mingrade' => (float)$rec->grade,
+                    'maxgrade' => (float)$rec->grade,
+                    'minsetnumber' => (int)$rec->setnumber,
+                    'maxsetnumber' => (int)$rec->setnumber,
+                    'minacronym' => $rec->acronym,
+                    'maxacronym' => $rec->acronym,
+                ];
+                continue;
+            }
+
+            $slot = $slots[$slotkey];
+            $autoassign = (int)$rec->autoassignstatus;
+            $grade = (float)$rec->grade;
+            if ($autoassign < $slot->minauto) {
+                $slot->minauto = $autoassign;
+            }
+            if ($autoassign > $slot->maxauto) {
+                $slot->maxauto = $autoassign;
+            }
+            if ($grade < $slot->mingrade) {
+                $slot->mingrade = $grade;
+                $slot->minsetnumber = (int)$rec->setnumber;
+                $slot->minacronym = $rec->acronym;
+            }
+            if ($grade > $slot->maxgrade) {
+                $slot->maxgrade = $grade;
+                $slot->maxsetnumber = (int)$rec->setnumber;
+                $slot->maxacronym = $rec->acronym;
+            }
+            $slots[$slotkey] = $slot;
         }
         $records->close();
+
+        foreach ($slots as $slot) {
+            $usemin = ($slot->minauto === 0 && $slot->maxauto === 0);
+            $setnumber = $usemin ? $slot->minsetnumber : $slot->maxsetnumber;
+            $acronym = $usemin ? $slot->minacronym : $slot->maxacronym;
+            if (empty($this->userstakensessionsbyacronym[$slot->userid][$setnumber][$acronym])) {
+                $this->userstakensessionsbyacronym[$slot->userid][$setnumber][$acronym] = 0;
+            }
+            $this->userstakensessionsbyacronym[$slot->userid][$setnumber][$acronym]++;
+        }
     }
 
     /**

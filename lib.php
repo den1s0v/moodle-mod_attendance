@@ -918,6 +918,10 @@ function attendance_extend_settings_navigation(settings_navigation $settingsnav,
             'title' => get_string('warnings', 'attendance'), ];
         }
     }
+    if (is_siteadmin()) {
+        $nodes[] = ['url' => new moodle_url('/mod/attendance/recalculate.php', ['attendanceid' => $cm->instance]),
+                    'title' => get_string('recalculategrades', 'attendance'), ];
+    }
 
     if (has_capability('mod/attendance:managetemporaryusers', context_module::instance($cm->id))) {
         $nodes[] = ['url' => new moodle_url('/mod/attendance/tempusers.php', ['id' => $cm->id]),
