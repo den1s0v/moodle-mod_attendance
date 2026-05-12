@@ -504,13 +504,14 @@ function mod_attendance_recalculate_diagnostic_counts(
 
     $lwsql = mod_attendance_recalculate_sql_last_write_subquery();
 
-    $gradebookbase = "FROM {grade_items} gi
+    $gradebookfrom = "FROM {grade_items} gi
         JOIN {grade_grades} gg ON gg.itemid = gi.id
         JOIN {attendance} a ON a.id = gi.iteminstance
         JOIN {course} c ON c.id = a.course
         JOIN {user} u ON u.id = gg.userid
-        {$lwsql['sql']}
-       WHERE gi.itemmodule = 'attendance'
+        {$lwsql['sql']}";
+
+    $gradebookwhere = "WHERE gi.itemmodule = 'attendance'
          AND gi.grademax > 0
          AND gg.rawgrade IS NOT NULL
          AND COALESCE(gg.overridden, 0) = 0
@@ -519,31 +520,34 @@ function mod_attendance_recalculate_diagnostic_counts(
          {$erawhere}";
 
     $diag = new stdClass();
-    $diag->eligible_gradebook = (int) $DB->count_records_sql("SELECT COUNT(1) $gradebookbase", $params);
+    $diag->eligible_gradebook = (int) $DB->count_records_sql("SELECT COUNT(1) {$gradebookfrom} {$gradebookwhere}", $params);
 
     $joinpt = "SELECT COUNT(1)
-                 $gradebookbase
+                 {$gradebookfrom}
                  JOIN (
                        {$ptsql['sql']}
                  ) pt ON pt.attendanceid = gi.iteminstance AND pt.userid = gg.userid";
+    $joinpt .= " {$gradebookwhere}";
     $diag->with_policy_rows = (int) $DB->count_records_sql($joinpt, $params);
 
     $mismatchparams = $params + ['eps' => $eps];
     $mismatchsql = "SELECT COUNT(1)
-                     $gradebookbase
+                     {$gradebookfrom}
                      JOIN (
                            {$ptsql['sql']}
                      ) pt ON pt.attendanceid = gi.iteminstance AND pt.userid = gg.userid
-                    WHERE pt.maxpoints_policy > 0
+                    {$gradebookwhere}
+                      AND pt.maxpoints_policy > 0
                       AND ABS(gg.rawgrade - ((pt.points_policy / NULLIF(pt.maxpoints_policy, 0)) * gi.grademax)) > :eps";
     $diag->sql_mismatch = (int) $DB->count_records_sql($mismatchsql, $mismatchparams);
 
     $strictsql = "SELECT COUNT(1)
-                    $gradebookbase
+                    {$gradebookfrom}
                     JOIN (
                           {$ptsql['sql']}
                     ) pt ON pt.attendanceid = gi.iteminstance AND pt.userid = gg.userid
-                   WHERE pt.maxpoints_policy > 0
+                   {$gradebookwhere}
+                     AND pt.maxpoints_policy > 0
                      AND pt.has_conflict = 1
                      AND ABS(gg.rawgrade - ((pt.points_policy / NULLIF(pt.maxpoints_policy, 0)) * gi.grademax)) > :eps";
     $diag->sql_mismatch_conflict = (int) $DB->count_records_sql($strictsql, $mismatchparams);
