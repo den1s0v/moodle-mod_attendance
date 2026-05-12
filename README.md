@@ -48,7 +48,13 @@ Behavior:
 
 If the candidate list is empty, the page shows **diagnostic counts** (eligible gradebook rows, policy join, SQL mismatch vs conflict) to explain why **Strict** returned nothing—for example mismatches without a conflict flag (try **Fallback**).
 
-The preview table shows **Expected (summary / apply)** (what will be written) and, in SQL modes, **Expected (SQL policy)** for comparison. Policy SQL uses the same timeslot rules as grading, including **course start date** on sessions (aligned with `classes/summary.php`).
+Additional tools on the same page:
+
+- **Course module ID (`cmid`)**: optional filter using the `id` from `/mod/attendance/manage.php?id=…` (overrides the numeric attendance instance id field when set).
+- **User ID (step-by-step breakdown)**: when an attendance scope (`cmid` or instance id) and a Moodle user id are set, the page prints a step-by-step checklist (grade flags, era filter, SQL aggregate vs summary, and recent `grade_grades_history`).
+- **Reject lowering**: default excludes rows where a recalculation would *decrease* raw; disable only if you intentionally want to apply downward corrections too.
+
+The preview table labels **current raw**, **expected raw after recalculation (summary/apply)**, **potential raw change (expected − current)**, and a separate **SQL diagnostic** column (strict/fallback modes).
 
 ## Business rules for overlapping group sessions
 

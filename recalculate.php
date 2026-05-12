@@ -24,15 +24,20 @@
 
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/locallib.php');
+require_once($CFG->libdir . '/gradelib.php');
 require_once($CFG->dirroot . '/mod/attendance/classes/summary.php');
 
 $action = optional_param('action', 'preview', PARAM_ALPHA);
 $attendanceid = optional_param('attendanceid', 0, PARAM_INT);
+$cmid = optional_param('cmid', 0, PARAM_INT);
+$forensic_userid = optional_param('forensic_userid', 0, PARAM_INT);
+$reject_lower = optional_param('reject_lower', 1, PARAM_INT);
 $era = optional_param('era', 'before_fix', PARAM_ALPHA);
 $fixdate = optional_param('fixdate', date('Y-m-d'), PARAM_TEXT);
 $eps = optional_param('eps', 0.00001, PARAM_FLOAT);
 $mode = optional_param('mode', 'strict', PARAM_ALPHA);
 $seedtext = optional_param('seed_text', '', PARAM_RAW);
+$reject_lower = $reject_lower ? 1 : 0;
 
 require_login();
 
@@ -46,8 +51,23 @@ if (!in_array($mode, $validmodes, true)) {
     $mode = 'strict';
 }
 
+$attendance_instance_id = (int) $attendanceid;
+$cmidresolvednote = '';
+if ($cmid > 0) {
+    $cm = get_coursemodule_from_id('attendance', $cmid, 0, false, MUST_EXIST);
+    $resolvedfromcm = (int) $cm->instance;
+    if ($attendance_instance_id > 0 && $attendance_instance_id !== $resolvedfromcm) {
+        $cmidresolvednote = get_string('recalculategradescmidconflict', 'attendance',
+            (object) ['cmid' => $cmid, 'fromcm' => $resolvedfromcm, 'fromfield' => $attendance_instance_id]);
+    }
+    $attendance_instance_id = $resolvedfromcm;
+}
+
 $baseurlparams = [
     'attendanceid' => $attendanceid,
+    'cmid' => $cmid,
+    'forensic_userid' => $forensic_userid,
+    'reject_lower' => $reject_lower,
     'era' => $era,
     'fixdate' => $fixdate,
     'eps' => $eps,
@@ -84,6 +104,378 @@ function mod_attendance_recalculate_parse_seed_pairs(string $text): array {
         }
     }
     return $pairs;
+}
+
+/**
+ * Policy aggregate (timeslot SQL) for a single attendance instance and user.
+ *
+ * @param moodle_database $DB
+ * @param int $attendanceid
+ * @param int $userid
+ * @return stdClass|null fields: points_policy, maxpoints_policy, has_conflict
+ */
+function mod_attendance_recalculate_get_pt_aggregate_for_pair(
+    moodle_database $DB,
+    int $attendanceid,
+    int $userid
+): ?stdClass {
+    $sql = "SELECT SUM(z.slot_grade_policy) AS points_policy,
+                   SUM(z.slot_maxgrade) AS maxpoints_policy,
+                   MAX(CASE WHEN z.sessions_in_slot > 1 AND z.min_grade <> z.max_grade THEN 1 ELSE 0 END) AS has_conflict
+              FROM (
+                    SELECT ats.attendanceid,
+                           atl.studentid AS userid,
+                           ats.sessdate,
+                           ats.duration,
+                           COUNT(DISTINCT ats.id) AS sessions_in_slot,
+                           MIN(stg.grade) AS min_grade,
+                           MAX(stg.grade) AS max_grade,
+                           CASE
+                             WHEN MIN(ats.autoassignstatus) = 0 AND MAX(ats.autoassignstatus) = 0
+                               THEN MIN(stg.grade)
+                             ELSE MAX(stg.grade)
+                           END AS slot_grade_policy,
+                           MAX(stm.maxgrade) AS slot_maxgrade
+                      FROM {attendance_sessions} ats
+                      JOIN {attendance} a_slot ON a_slot.id = ats.attendanceid
+                      JOIN {course} c_slot ON c_slot.id = a_slot.course
+                      JOIN {attendance_log} atl ON atl.sessionid = ats.id
+                      JOIN {attendance_statuses} stg
+                        ON stg.id = atl.statusid
+                       AND stg.deleted = 0
+                       AND stg.visible = 1
+                      JOIN (
+                            SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
+                              FROM {attendance_statuses}
+                             WHERE deleted = 0
+                               AND visible = 1
+                          GROUP BY attendanceid, setnumber
+                      ) stm
+                        ON stm.attendanceid = ats.attendanceid
+                       AND stm.setnumber = ats.statusset
+                     WHERE ats.lasttaken <> 0
+                       AND ats.sessdate >= c_slot.startdate
+                       AND ats.attendanceid = :attendanceid
+                       AND atl.studentid = :userid
+                  GROUP BY ats.attendanceid, atl.studentid, ats.sessdate, ats.duration
+              ) z
+          GROUP BY z.attendanceid, z.userid";
+
+    return $DB->get_record_sql($sql, ['attendanceid' => $attendanceid, 'userid' => $userid]);
+}
+
+/**
+ * Build HTML step-by-step grade breakdown for one pair.
+ *
+ * @param moodle_database $DB
+ * @param int $attendanceid
+ * @param int $userid
+ * @param string $era
+ * @param int $fixts
+ * @param float $eps
+ * @return string
+ */
+function mod_attendance_recalculate_forensic_html(
+    moodle_database $DB,
+    int $attendanceid,
+    int $userid,
+    string $era,
+    int $fixts,
+    float $eps
+): string {
+
+    $out = html_writer::tag('h3', get_string('recalculategradesforensic_title', 'attendance'));
+
+    $att = $DB->get_record('attendance', ['id' => $attendanceid], '*', IGNORE_MISSING);
+    if (!$att) {
+        return $out . html_writer::div(get_string('recalculategradesforensic_noattendance', 'attendance'), 'alert alert-warning');
+    }
+
+    $course = $DB->get_record('course', ['id' => $att->course], 'id,fullname,startdate', MUST_EXIST);
+    $user = $DB->get_record('user', ['id' => $userid], 'id,firstname,lastname,username', IGNORE_MISSING);
+    if (!$user) {
+        return $out . html_writer::div(get_string('recalculategradesforensic_nouser', 'attendance'), 'alert alert-warning');
+    }
+
+    $gi = $DB->get_record('grade_items', [
+        'itemtype' => 'mod',
+        'itemmodule' => 'attendance',
+        'iteminstance' => $attendanceid,
+        'courseid' => $course->id,
+    ], '*', IGNORE_MISSING);
+    if (!$gi) {
+        $gi = $DB->get_record('grade_items', [
+            'itemmodule' => 'attendance',
+            'iteminstance' => $attendanceid,
+            'courseid' => $course->id,
+        ], '*', IGNORE_MISSING);
+    }
+
+    $steps = [];
+    $gg = null;
+
+    if (!$gi) {
+        $steps[] = get_string('recalculategradesforensic_step_noitem', 'attendance');
+    } else {
+        $gg = $DB->get_record('grade_grades', ['itemid' => $gi->id, 'userid' => $userid], '*', IGNORE_MISSING);
+        if (!$gg) {
+            $steps[] = get_string('recalculategradesforensic_step_nograde', 'attendance');
+        } else {
+            $flags = [];
+            if (!empty($gg->overridden)) {
+                $flags[] = 'overridden';
+            }
+            if (!empty($gg->excluded)) {
+                $flags[] = 'excluded';
+            }
+            if (!empty($gg->locked)) {
+                $flags[] = 'locked';
+            }
+            if ($flags) {
+                $steps[] = get_string('recalculategradesforensic_step_flags', 'attendance', implode(', ', $flags));
+            } else {
+                $steps[] = get_string('recalculategradesforensic_step_flagsok', 'attendance');
+            }
+
+            $rawdisp = is_null($gg->rawgrade) ? 'NULL' : format_float((float) $gg->rawgrade, 5);
+            $finaldisp = is_null($gg->finalgrade) ? 'NULL' : format_float((float) $gg->finalgrade, 5);
+            $steps[] = get_string('recalculategradesforensic_step_grades', 'attendance',
+                (object) ['raw' => $rawdisp, 'final' => $finaldisp, 'max' => format_float((float) $gi->grademax, 5)]);
+        }
+
+        $lastwrite = (int) $DB->get_field_sql(
+            "SELECT MAX(h.timemodified)
+               FROM {grade_grades_history} h
+              WHERE h.itemid = ? AND h.userid = ?",
+            [$gi->id, $userid]
+        );
+        $steps[] = get_string('recalculategradesforensic_step_lastwrite', 'attendance', userdate($lastwrite));
+
+        if ($era === 'before_fix') {
+            $pass = ($lastwrite === 0 || $lastwrite < $fixts);
+            $steps[] = $pass
+                ? get_string('recalculategradesforensic_step_erapass_before', 'attendance')
+                : get_string('recalculategradesforensic_step_erafail_before', 'attendance');
+        } else if ($era === 'after_fix') {
+            $pass = ($lastwrite >= $fixts);
+            $steps[] = $pass
+                ? get_string('recalculategradesforensic_step_erapass_after', 'attendance')
+                : get_string('recalculategradesforensic_step_erafail_after', 'attendance');
+        } else {
+            $steps[] = get_string('recalculategradesforensic_step_eraall', 'attendance');
+        }
+    }
+
+    $steps[] = get_string('recalculategradesforensic_step_coursestart', 'attendance',
+        userdate((int) $course->startdate));
+
+    $pt = mod_attendance_recalculate_get_pt_aggregate_for_pair($DB, $attendanceid, $userid);
+    if (!$pt || (float) $pt->maxpoints_policy <= 0) {
+        $steps[] = get_string('recalculategradesforensic_step_nopt', 'attendance');
+    } else {
+        $grademax = ($gi) ? (float) $gi->grademax : 0.0;
+        $sqlexp = $grademax > 0
+            ? ((float) $pt->points_policy / (float) $pt->maxpoints_policy) * $grademax
+            : null;
+        $sqldisp = $sqlexp === null ? '—' : format_float($sqlexp, 5);
+        $steps[] = get_string('recalculategradesforensic_step_pt', 'attendance', (object) [
+            'points' => format_float((float) $pt->points_policy, 5),
+            'maxp' => format_float((float) $pt->maxpoints_policy, 5),
+            'conflict' => !empty($pt->has_conflict) ? get_string('yes', 'moodle') : get_string('no', 'moodle'),
+            'sqlexp' => $sqldisp,
+        ]);
+    }
+
+    $attendancegrade = 0;
+    $sumexp = null;
+    if (!empty($att->grade)) {
+        $g = (int) $att->grade;
+        if ($g < 0) {
+            $scale = $DB->get_record('scale', ['id' => -$g], '*', MUST_EXIST);
+            $scalearray = explode(',', $scale->scale);
+            $attendancegrade = count($scalearray);
+        } else {
+            $attendancegrade = $g;
+        }
+    }
+    if ($attendancegrade <= 0) {
+        $steps[] = get_string('recalculategradesforensic_step_noactivitygrade', 'attendance');
+        $sumexp = null;
+    } else {
+        $summary = new mod_attendance_summary($attendanceid, [$userid]);
+        if ($summary->has_taken_sessions($userid)) {
+            $us = $summary->get_taken_sessions_summary_for($userid);
+            $sumexp = $us->takensessionspercentage * $attendancegrade;
+            $steps[] = get_string('recalculategradesforensic_step_summary', 'attendance', (object) [
+                'pct' => format_float($us->takensessionspercentage * 100, 2),
+                'exp' => format_float($sumexp, 5),
+            ]);
+        } else {
+            $sumexp = null;
+            $steps[] = get_string('recalculategradesforensic_step_summarynone', 'attendance');
+        }
+    }
+
+    if ($gi && $gg && $pt && (float) $pt->maxpoints_policy > 0 && !is_null($gg->rawgrade)) {
+        $sqlexpfull = ((float) $pt->points_policy / (float) $pt->maxpoints_policy) * (float) $gi->grademax;
+        $deltasql = (float) $gg->rawgrade - $sqlexpfull;
+        if (abs($deltasql) <= $eps) {
+            $steps[] = get_string('recalculategradesforensic_step_sqlmatch', 'attendance');
+        } else {
+            $steps[] = get_string('recalculategradesforensic_step_sqlmismatch', 'attendance', format_float($deltasql, 5));
+        }
+    }
+
+    if ($gi && $gg && isset($sumexp) && !is_null($gg->rawgrade) && $sumexp !== null) {
+        $deltasum = (float) $gg->rawgrade - (float) $sumexp;
+        if (abs($deltasum) <= $eps) {
+            $steps[] = get_string('recalculategradesforensic_step_summarymatch', 'attendance');
+        } else {
+            $steps[] = get_string('recalculategradesforensic_step_summarymismatch', 'attendance', format_float($deltasum, 5));
+        }
+    }
+
+    $olist = html_writer::start_tag('ol', ['class' => 'mb-3']);
+    foreach ($steps as $st) {
+        $olist .= html_writer::tag('li', $st);
+    }
+    $olist .= html_writer::end_tag('ol');
+    $out .= $olist;
+
+    if ($gi) {
+        $hist = $DB->get_records_sql(
+            "SELECT h.timemodified, h.rawgrade, h.finalgrade, h.usermodified
+               FROM {grade_grades_history} h
+              WHERE h.itemid = ?
+                AND h.userid = ?
+           ORDER BY h.timemodified DESC",
+            [$gi->id, $userid],
+            0,
+            25
+        );
+        if ($hist) {
+            $table = new html_table();
+            $table->head = [
+                get_string('recalculategradesforensic_hist_time', 'attendance'),
+                get_string('recalculategradesforensic_hist_user', 'attendance'),
+                get_string('recalculategradesforensic_hist_raw', 'attendance'),
+                get_string('recalculategradesforensic_hist_final', 'attendance'),
+            ];
+            foreach ($hist as $h) {
+                $modifier = '';
+                if (!empty($h->usermodified)) {
+                    $mu = $DB->get_record('user', ['id' => $h->usermodified], 'id,firstname,lastname', IGNORE_MISSING);
+                    $modifier = $mu ? fullname($mu) : (string) $h->usermodified;
+                }
+                $table->data[] = [
+                    userdate((int) $h->timemodified),
+                    s($modifier),
+                    is_null($h->rawgrade) ? '-' : format_float((float) $h->rawgrade, 5),
+                    is_null($h->finalgrade) ? '-' : format_float((float) $h->finalgrade, 5),
+                ];
+            }
+            $out .= html_writer::tag('h4', get_string('recalculategradesforensic_hist_title', 'attendance'));
+            $out .= html_writer::table($table);
+        } else {
+            $out .= html_writer::div(get_string('recalculategradesforensic_hist_empty', 'attendance'), 'alert alert-info');
+        }
+    }
+
+    $out .= html_writer::div(
+        format_string($course->fullname) . ' — ' . format_string($att->name) .
+        ' (#' . $attendanceid . ') — ' . fullname($user) . ' (' . s($user->username) . ')',
+        'text-muted small'
+    );
+
+    return $out;
+}
+
+/**
+ * Count preview reasons: pool vs after summary filter, and apply direction splits.
+ *
+ * @param array<int, stdClass> $pool after SQL + enrich + display
+ * @param array<int, stdClass> $aftersummary after filter_after_summary
+ * @param float $eps
+ * @param bool $requireconflict strict mode
+ * @return stdClass
+ */
+function mod_attendance_recalculate_reason_counts(
+    array $pool,
+    array $aftersummary,
+    float $eps,
+    bool $requireconflict
+): stdClass {
+    $o = new stdClass();
+    $o->pool_count = count($pool);
+    $afterkeys = [];
+    foreach ($aftersummary as $r) {
+        $afterkeys[$r->pairkey] = true;
+    }
+    $o->dropped_after_summary = 0;
+    $o->dropped_strict_noconflict = 0;
+    foreach ($pool as $r) {
+        if (isset($afterkeys[$r->pairkey])) {
+            continue;
+        }
+        if ($requireconflict && empty($r->has_conflict)) {
+            $o->dropped_strict_noconflict++;
+            continue;
+        }
+        $raw = $r->rawgrade ?? null;
+        $exp = $r->raw_expected_summary ?? null;
+        if ($exp === null && $raw === null) {
+            $o->dropped_after_summary++;
+            continue;
+        }
+        if ($exp === null || $raw === null) {
+            $o->dropped_after_summary++;
+            continue;
+        }
+        if (abs((float) $raw - (float) $exp) <= $eps) {
+            $o->dropped_after_summary++;
+        }
+    }
+
+    $o->apply_raise = 0;
+    $o->apply_lower = 0;
+    $o->apply_edge = 0;
+    foreach ($aftersummary as $r) {
+        $raw = $r->rawgrade ?? null;
+        $exp = $r->raw_expected_summary ?? null;
+        if ($raw === null || $exp === null) {
+            $o->apply_edge++;
+            continue;
+        }
+        if ((float) $exp > (float) $raw + $eps) {
+            $o->apply_raise++;
+        } else if ((float) $exp < (float) $raw - $eps) {
+            $o->apply_lower++;
+        } else {
+            $o->apply_edge++;
+        }
+    }
+
+    return $o;
+}
+
+/**
+ * Exclude rows where apply would lower numeric raw (optional safety).
+ *
+ * @param array<int, stdClass> $rows
+ * @param float $eps
+ * @return array<int, stdClass>
+ */
+function mod_attendance_recalculate_filter_reject_lower(array $rows, float $eps): array {
+    $out = [];
+    foreach ($rows as $r) {
+        $raw = $r->rawgrade ?? null;
+        $exp = $r->raw_expected_summary ?? null;
+        if ($raw !== null && $exp !== null && (float) $exp < (float) $raw - $eps) {
+            continue;
+        }
+        $out[] = $r;
+    }
+    return $out;
 }
 
 /**
@@ -614,21 +1006,40 @@ if ($fixts === false) {
 }
 
 $diag = null;
+$reasoncounts = null;
+$excludedlower = 0;
+$aftersummary = [];
+$pool = [];
 if ($mode === 'sql_seeded') {
     $seedpairs = mod_attendance_recalculate_parse_seed_pairs($seedtext);
-    $candidates = mod_attendance_recalculate_seed_candidates($DB, $seedpairs, $era, $fixts);
-    $candidates = mod_attendance_recalculate_enrich_expected_from_summary($candidates);
-    $candidates = mod_attendance_recalculate_apply_display_expected($candidates);
+    $pool = mod_attendance_recalculate_seed_candidates($DB, $seedpairs, $era, $fixts);
+    $pool = mod_attendance_recalculate_enrich_expected_from_summary($pool);
+    $pool = mod_attendance_recalculate_apply_display_expected($pool);
+    $aftersummary = $pool;
+    $reasoncounts = mod_attendance_recalculate_reason_counts($pool, $aftersummary, $eps, false);
+    $candidates = $aftersummary;
+    if ($reject_lower) {
+        $beforect = count($candidates);
+        $candidates = mod_attendance_recalculate_filter_reject_lower($candidates, $eps);
+        $excludedlower = $beforect - count($candidates);
+    }
 } else {
     $requireconflict = ($mode === 'strict');
-    $candidates = mod_attendance_recalculate_query_candidates($DB, $attendanceid, $era, $fixts, $eps, $requireconflict);
-    $candidates = mod_attendance_recalculate_enrich_expected_from_summary($candidates);
-    $candidates = mod_attendance_recalculate_filter_after_summary($candidates, $eps, $requireconflict);
-    $candidates = mod_attendance_recalculate_apply_display_expected($candidates);
+    $pool = mod_attendance_recalculate_query_candidates($DB, $attendance_instance_id, $era, $fixts, $eps, $requireconflict);
+    $pool = mod_attendance_recalculate_enrich_expected_from_summary($pool);
+    $pool = mod_attendance_recalculate_apply_display_expected($pool);
+    $aftersummary = mod_attendance_recalculate_filter_after_summary($pool, $eps, $requireconflict);
+    $reasoncounts = mod_attendance_recalculate_reason_counts($pool, $aftersummary, $eps, $requireconflict);
+    $candidates = $aftersummary;
+    if ($reject_lower) {
+        $beforect = count($candidates);
+        $candidates = mod_attendance_recalculate_filter_reject_lower($candidates, $eps);
+        $excludedlower = $beforect - count($candidates);
+    }
 }
 
 if (empty($candidates) && $mode !== 'sql_seeded') {
-    $diag = mod_attendance_recalculate_diagnostic_counts($DB, $attendanceid, $era, $fixts, $eps);
+    $diag = mod_attendance_recalculate_diagnostic_counts($DB, $attendance_instance_id, $era, $fixts, $eps);
 }
 
 $attendancekeys = [];
@@ -649,6 +1060,21 @@ $updatedusers = 0;
 echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('recalculategrades', 'attendance'));
 
+if ($forensic_userid > 0) {
+    if ($attendance_instance_id > 0) {
+        echo html_writer::div(
+            mod_attendance_recalculate_forensic_html($DB, $attendance_instance_id, $forensic_userid, $era, $fixts, $eps),
+            'card card-body mb-3'
+        );
+    } else {
+        echo $OUTPUT->notification(get_string('recalculategradesforensic_needscope', 'attendance'),
+            \core\output\notification::NOTIFY_WARNING);
+    }
+}
+
+if ($cmidresolvednote !== '') {
+    echo $OUTPUT->notification($cmidresolvednote, \core\output\notification::NOTIFY_WARNING);
+}
 if ($action === 'apply') {
     require_sesskey();
     if (empty($candidates)) {
@@ -679,7 +1105,7 @@ if ($action === 'apply') {
     }
 }
 
-$summary = get_string('recalculategradessummarydetailed2', 'attendance',
+$summary = get_string('recalculategradessummarydetailed3', 'attendance',
     (object) [
         'activities' => $numattendance,
         'users' => $numusers,
@@ -688,9 +1114,28 @@ $summary = get_string('recalculategradessummarydetailed2', 'attendance',
         'mode' => $mode,
         'eps' => $eps,
         'attendanceid' => $attendanceid ?: get_string('recalculategradesallinstances', 'attendance'),
+        'cmid' => $cmid > 0 ? (string) $cmid : '—',
+        'instance' => $attendance_instance_id > 0 ? (string) $attendance_instance_id : '—',
+        'rejectlower' => $reject_lower ? get_string('yes', 'moodle') : get_string('no', 'moodle'),
     ]);
 echo html_writer::div($summary, 'alert alert-info');
 
+if ($reasoncounts !== null) {
+    $reasonlines = [
+        get_string('recalculategrades_reason_title', 'attendance'),
+        get_string('recalculategrades_reason_pool', 'attendance', $reasoncounts->pool_count),
+        get_string('recalculategrades_reason_droppedsummary', 'attendance', $reasoncounts->dropped_after_summary),
+        get_string('recalculategrades_reason_mismatchsummary', 'attendance', count($aftersummary)),
+        get_string('recalculategrades_reason_raise', 'attendance', $reasoncounts->apply_raise),
+        get_string('recalculategrades_reason_lower', 'attendance', $reasoncounts->apply_lower),
+        get_string('recalculategrades_reason_edge', 'attendance', $reasoncounts->apply_edge),
+    ];
+    if ($reject_lower && $excludedlower > 0) {
+        $reasonlines[] = get_string('recalculategrades_reason_excludedlower', 'attendance', $excludedlower);
+    }
+    $reasonlines[] = get_string('recalculategrades_reason_applynote', 'attendance');
+    echo html_writer::div(implode(html_writer::empty_tag('br'), $reasonlines), 'alert alert-light border mb-3');
+}
 // Filter form: POST so seed textarea is reliable.
 $filterurl = new moodle_url('/mod/attendance/recalculate.php');
 $filterform = html_writer::start_tag('form', ['method' => 'post', 'action' => $filterurl->out(false), 'class' => 'mb-3']);
@@ -718,6 +1163,35 @@ $filterform .= html_writer::empty_tag('input', [
     'class' => 'mr-2',
     'style' => 'max-width: 160px;',
 ]);
+$filterform .= html_writer::label(get_string('recalculategradescmid', 'attendance'),
+    'recalculate-cmid', false, ['class' => 'mr-2']);
+$filterform .= html_writer::empty_tag('input', [
+    'type' => 'number',
+    'name' => 'cmid',
+    'id' => 'recalculate-cmid',
+    'value' => $cmid ?: '',
+    'class' => 'mr-2',
+    'style' => 'max-width: 140px;',
+    'title' => get_string('recalculategradescmid_help', 'attendance'),
+]);
+$filterform .= html_writer::label(get_string('recalculategradesforensic_userid', 'attendance'),
+    'recalculate-forensic', false, ['class' => 'mr-2']);
+$filterform .= html_writer::empty_tag('input', [
+    'type' => 'number',
+    'name' => 'forensic_userid',
+    'id' => 'recalculate-forensic',
+    'value' => $forensic_userid ?: '',
+    'class' => 'mr-2',
+    'style' => 'max-width: 140px;',
+]);
+$rjopts = [
+    '1' => get_string('recalculategrades_rejectlower_yes', 'attendance'),
+    '0' => get_string('recalculategrades_rejectlower_no', 'attendance'),
+];
+$filterform .= html_writer::label(get_string('recalculategrades_rejectlower', 'attendance'),
+    'recalculate-rejectlower', false, ['class' => 'mr-2']);
+$filterform .= html_writer::select($rjopts, 'reject_lower', (string) $reject_lower, false,
+    ['id' => 'recalculate-rejectlower', 'class' => 'mr-2']);
 $filterform .= html_writer::label(get_string('recalculategradesera', 'attendance'),
     'recalculate-era', false, ['class' => 'mr-2']);
 $options = [
@@ -791,6 +1265,9 @@ if ($mode === 'sql_seeded' && mod_attendance_recalculate_parse_seed_pairs($seedt
     $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'action', 'value' => 'apply']);
     $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
     $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'attendanceid', 'value' => $attendanceid]);
+    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'cmid', 'value' => $cmid]);
+    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'forensic_userid', 'value' => $forensic_userid]);
+    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'reject_lower', 'value' => $reject_lower]);
     $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'era', 'value' => $era]);
     $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'fixdate', 'value' => $fixdate]);
     $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'eps', 'value' => $eps]);
@@ -815,20 +1292,20 @@ if (!empty($candidates)) {
         get_string('course'),
         get_string('modulename', 'attendance'),
         get_string('participant', 'attendance'),
-        get_string('recalculategradesrawbefore', 'attendance'),
-        get_string('recalculategradesexpectedsummary', 'attendance'),
-        get_string('recalculategradesdelta', 'attendance'),
-        get_string('recalculategradeslastwrite', 'attendance'),
+        get_string('recalculategrades_col_currentraw', 'attendance'),
     ];
     if ($mode !== 'sql_seeded') {
-        array_splice($table->head, 4, 0, [get_string('recalculategradesexpectedsql', 'attendance')]);
+        $table->head[] = get_string('recalculategrades_col_sqldiag', 'attendance');
     }
+    $table->head[] = get_string('recalculategrades_col_expectedapply', 'attendance');
+    $table->head[] = get_string('recalculategrades_col_potentialrawdelta', 'attendance');
+    $table->head[] = get_string('recalculategrades_col_lastwrite', 'attendance');
     if ($mode !== 'sql_seeded') {
-        $table->head[] = get_string('recalculategradesconflict', 'attendance');
+        $table->head[] = get_string('recalculategrades_col_conflict', 'attendance');
     }
     if ($applydone) {
-        $table->head[] = get_string('recalculategradesrawafter', 'attendance');
-        $table->head[] = get_string('recalculategradesfinalafter', 'attendance');
+        $table->head[] = get_string('recalculategrades_col_rawafter', 'attendance');
+        $table->head[] = get_string('recalculategrades_col_finalafter', 'attendance');
     }
     foreach ($candidates as $row) {
         $key = $row->pairkey;
@@ -840,15 +1317,20 @@ if (!empty($candidates)) {
             'firstname' => $row->firstname,
             'lastname' => $row->lastname,
         ]) . ' (' . s($row->username) . ')';
-        $cells[] = is_null($before->rawgrade ?? null) ? '-' : format_float((float) $before->rawgrade, 5);
+        $curraw = $before->rawgrade ?? null;
+        $cells[] = is_null($curraw) ? '-' : format_float((float) $curraw, 5);
         if ($mode !== 'sql_seeded') {
             $sqlexp = $row->raw_expected_sql ?? null;
             $cells[] = ($sqlexp === null) ? '-' : format_float((float) $sqlexp, 5);
         }
         $sumexp = $row->raw_expected_policy ?? null;
         $cells[] = ($sumexp === null) ? '-' : format_float((float) $sumexp, 5);
-        $delta = $row->delta_raw_vs_policy ?? null;
-        $cells[] = ($delta === null) ? '-' : format_float((float) $delta, 5);
+        if ($sumexp !== null && $curraw !== null) {
+            $potential = (float) $sumexp - (float) $curraw;
+            $cells[] = format_float($potential, 5);
+        } else {
+            $cells[] = '-';
+        }
         $cells[] = userdate((int) $row->last_grade_write_ts);
         if ($mode !== 'sql_seeded') {
             $cells[] = !empty($row->has_conflict) ? get_string('yes', 'moodle') : get_string('no', 'moodle');
@@ -862,7 +1344,7 @@ if (!empty($candidates)) {
     }
     echo html_writer::table($table);
     if ($mode !== 'sql_seeded') {
-        echo html_writer::div(get_string('recalculategradesexpectedhelp', 'attendance'), 'text-muted small mt-2');
+        echo html_writer::div(get_string('recalculategrades_tablehelp', 'attendance'), 'text-muted small mt-2');
     }
 }
 
