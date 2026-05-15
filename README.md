@@ -51,7 +51,7 @@ If the candidate list is empty, the page shows **diagnostic counts** (eligible g
 Additional tools on the same page:
 
 - **Course module ID (`cmid`)**: optional filter using the `id` from `/mod/attendance/manage.php?id=…` (overrides the numeric attendance instance id field when set).
-- **User ID (step-by-step breakdown)**: when an attendance scope (`cmid` or instance id) and a Moodle user id are set, the page prints a step-by-step checklist (grade flags, era filter, SQL aggregate vs summary, and recent `grade_grades_history`).
+- **Forensic user ID**: when an attendance scope (`cmid` or instance id) and a Moodle user id are set, the page prints a step-by-step checklist (grade flags, era filter, SQL aggregate vs summary, and recent `grade_grades_history`).
 - **Reject lowering**: default excludes rows where a recalculation would *decrease* raw; disable only if you intentionally want to apply downward corrections too.
 
 The preview table labels **current raw**, **expected raw after recalculation (summary/apply)**, **potential raw change (expected − current)**, and a separate **SQL diagnostic** column (strict/fallback modes).

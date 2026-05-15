@@ -165,7 +165,7 @@ function mod_attendance_recalculate_get_pt_aggregate_for_pair(
 }
 
 /**
- * Build HTML step-by-step grade breakdown for one pair.
+ * Build HTML forensic drill-down for one pair.
  *
  * @param moodle_database $DB
  * @param int $attendanceid
