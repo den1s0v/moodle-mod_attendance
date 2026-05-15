@@ -165,6 +165,279 @@ function mod_attendance_recalculate_get_pt_aggregate_for_pair(
 }
 
 /**
+ * Raw attendance_log rows with session and status details (basis of grade calculation).
+ *
+ * @param moodle_database $DB
+ * @param int $attendanceid
+ * @param int $userid
+ * @return array<int, stdClass>
+ */
+function mod_attendance_recalculate_forensic_get_log_rows(
+    moodle_database $DB,
+    int $attendanceid,
+    int $userid
+): array {
+    $sql = "SELECT atl.id AS logid,
+                   atl.sessionid,
+                   atl.timetaken,
+                   ats.sessdate,
+                   ats.duration,
+                   ats.groupid,
+                   ats.statusset,
+                   ats.autoassignstatus,
+                   ats.lasttaken,
+                   stg.id AS statusid,
+                   stg.acronym,
+                   stg.description AS statusdesc,
+                   stg.grade AS statusgrade,
+                   stm.maxgrade AS setmaxgrade,
+                   c.startdate AS coursestartdate,
+                   CASE WHEN ats.sessdate < c.startdate THEN 1 ELSE 0 END AS excluded_by_course_start
+              FROM {attendance_log} atl
+              JOIN {attendance_sessions} ats ON ats.id = atl.sessionid
+              JOIN {attendance} a ON a.id = ats.attendanceid
+              JOIN {course} c ON c.id = a.course
+              JOIN {attendance_statuses} stg
+                ON stg.id = atl.statusid
+               AND stg.deleted = 0
+               AND stg.visible = 1
+              LEFT JOIN (
+                    SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
+                      FROM {attendance_statuses}
+                     WHERE deleted = 0
+                       AND visible = 1
+                  GROUP BY attendanceid, setnumber
+              ) stm
+                ON stm.attendanceid = ats.attendanceid
+               AND stm.setnumber = ats.statusset
+             WHERE ats.attendanceid = :attendanceid
+               AND atl.studentid = :userid
+          ORDER BY ats.sessdate ASC, ats.duration ASC, ats.id ASC, atl.id ASC";
+
+    return $DB->get_records_sql($sql, ['attendanceid' => $attendanceid, 'userid' => $userid]);
+}
+
+/**
+ * Timeslot-collapsed rows (same rules as summary / policy SQL).
+ *
+ * @param moodle_database $DB
+ * @param int $attendanceid
+ * @param int $userid
+ * @return array<int, stdClass>
+ */
+function mod_attendance_recalculate_forensic_get_slot_rows(
+    moodle_database $DB,
+    int $attendanceid,
+    int $userid
+): array {
+    $sql = "SELECT z.sessdate,
+                   z.duration,
+                   z.sessions_in_slot,
+                   z.session_ids,
+                   z.min_grade,
+                   z.max_grade,
+                   z.min_autoassign,
+                   z.max_autoassign,
+                   z.slot_grade_policy,
+                   z.slot_maxgrade,
+                   z.included_in_summary
+              FROM (
+                    SELECT ats.sessdate,
+                           ats.duration,
+                           COUNT(DISTINCT ats.id) AS sessions_in_slot,
+                           GROUP_CONCAT(DISTINCT ats.id ORDER BY ats.id) AS session_ids,
+                           MIN(stg.grade) AS min_grade,
+                           MAX(stg.grade) AS max_grade,
+                           MIN(ats.autoassignstatus) AS min_autoassign,
+                           MAX(ats.autoassignstatus) AS max_autoassign,
+                           CASE
+                             WHEN MIN(ats.autoassignstatus) = 0 AND MAX(ats.autoassignstatus) = 0
+                               THEN MIN(stg.grade)
+                             ELSE MAX(stg.grade)
+                           END AS slot_grade_policy,
+                           MAX(stm.maxgrade) AS slot_maxgrade,
+                           MAX(CASE WHEN ats.lasttaken <> 0 AND ats.sessdate >= c_slot.startdate THEN 1 ELSE 0 END) AS included_in_summary
+                      FROM {attendance_sessions} ats
+                      JOIN {attendance} a_slot ON a_slot.id = ats.attendanceid
+                      JOIN {course} c_slot ON c_slot.id = a_slot.course
+                      JOIN {attendance_log} atl ON atl.sessionid = ats.id
+                      JOIN {attendance_statuses} stg
+                        ON stg.id = atl.statusid
+                       AND stg.deleted = 0
+                       AND stg.visible = 1
+                      JOIN (
+                            SELECT attendanceid, setnumber, MAX(grade) AS maxgrade
+                              FROM {attendance_statuses}
+                             WHERE deleted = 0
+                               AND visible = 1
+                          GROUP BY attendanceid, setnumber
+                      ) stm
+                        ON stm.attendanceid = ats.attendanceid
+                       AND stm.setnumber = ats.statusset
+                     WHERE ats.attendanceid = :attendanceid
+                       AND atl.studentid = :userid
+                  GROUP BY ats.sessdate, ats.duration
+              ) z
+          ORDER BY z.sessdate ASC, z.duration ASC";
+
+    return $DB->get_records_sql($sql, ['attendanceid' => $attendanceid, 'userid' => $userid]);
+}
+
+/**
+ * Status scale rows for this attendance instance (per status set).
+ *
+ * @param moodle_database $DB
+ * @param int $attendanceid
+ * @return array<int, stdClass>
+ */
+function mod_attendance_recalculate_forensic_get_status_rows(moodle_database $DB, int $attendanceid): array {
+    $sql = "SELECT id,
+                   setnumber,
+                   acronym,
+                   description,
+                   grade,
+                   visible,
+                   deleted
+              FROM {attendance_statuses}
+             WHERE attendanceid = :attendanceid
+          ORDER BY setnumber ASC, grade ASC, id ASC";
+
+    return $DB->get_records_sql($sql, ['attendanceid' => $attendanceid]);
+}
+
+/**
+ * HTML tables: log basis, timeslot collapse, status sets.
+ *
+ * @param moodle_database $DB
+ * @param int $attendanceid
+ * @param int $userid
+ * @param int $coursestartdate
+ * @return string
+ */
+function mod_attendance_recalculate_forensic_basis_html(
+    moodle_database $DB,
+    int $attendanceid,
+    int $userid,
+    int $coursestartdate
+): string {
+    $out = '';
+
+    $statusrows = mod_attendance_recalculate_forensic_get_status_rows($DB, $attendanceid);
+    if ($statusrows) {
+        $stable = new html_table();
+        $stable->head = [
+            get_string('recalculategradesforensic_status_set', 'attendance'),
+            get_string('recalculategradesforensic_status_acronym', 'attendance'),
+            get_string('recalculategradesforensic_status_grade', 'attendance'),
+            get_string('recalculategradesforensic_status_desc', 'attendance'),
+            get_string('recalculategradesforensic_status_visible', 'attendance'),
+        ];
+        foreach ($statusrows as $sr) {
+            $stable->data[] = [
+                (int) $sr->setnumber,
+                s($sr->acronym),
+                format_float((float) $sr->grade, 5),
+                format_string($sr->description),
+                !empty($sr->visible) && empty($sr->deleted)
+                    ? get_string('yes', 'moodle')
+                    : get_string('no', 'moodle'),
+            ];
+        }
+        $out .= html_writer::tag('h4', get_string('recalculategradesforensic_status_title', 'attendance'));
+        $out .= html_writer::table($stable);
+    }
+
+    $logrows = mod_attendance_recalculate_forensic_get_log_rows($DB, $attendanceid, $userid);
+    $out .= html_writer::tag('h4', get_string('recalculategradesforensic_log_title', 'attendance'));
+    if (empty($logrows)) {
+        $out .= html_writer::div(get_string('recalculategradesforensic_log_empty', 'attendance'), 'alert alert-warning');
+    } else {
+        $ltable = new html_table();
+        $ltable->head = [
+            get_string('recalculategradesforensic_log_session', 'attendance'),
+            get_string('recalculategradesforensic_log_slot', 'attendance'),
+            get_string('recalculategradesforensic_log_group', 'attendance'),
+            get_string('recalculategradesforensic_log_status', 'attendance'),
+            get_string('recalculategradesforensic_log_grade', 'attendance'),
+            get_string('recalculategradesforensic_log_setmax', 'attendance'),
+            get_string('recalculategradesforensic_log_autoassign', 'attendance'),
+            get_string('recalculategradesforensic_log_lasttaken', 'attendance'),
+            get_string('recalculategradesforensic_log_insummary', 'attendance'),
+        ];
+        foreach ($logrows as $lr) {
+            $included = (
+                !empty($lr->lasttaken) &&
+                empty($lr->excluded_by_course_start)
+            );
+            $ltable->data[] = [
+                (int) $lr->sessionid,
+                userdate((int) $lr->sessdate) . ' +' . (int) $lr->duration . 's',
+                (int) $lr->groupid ?: '—',
+                s($lr->acronym) . ' (#' . (int) $lr->statusid . ')',
+                format_float((float) $lr->statusgrade, 5),
+                format_float((float) $lr->setmaxgrade, 5),
+                (int) $lr->autoassignstatus,
+                !empty($lr->lasttaken) ? userdate((int) $lr->lasttaken) : '—',
+                $included ? get_string('yes', 'moodle') : get_string('no', 'moodle'),
+            ];
+        }
+        $out .= html_writer::table($ltable);
+        $out .= html_writer::div(get_string('recalculategradesforensic_log_help', 'attendance',
+            userdate($coursestartdate)), 'text-muted small mb-3');
+    }
+
+    $slotrows = mod_attendance_recalculate_forensic_get_slot_rows($DB, $attendanceid, $userid);
+    $out .= html_writer::tag('h4', get_string('recalculategradesforensic_slot_title', 'attendance'));
+    if (empty($slotrows)) {
+        $out .= html_writer::div(get_string('recalculategradesforensic_slot_empty', 'attendance'), 'alert alert-warning');
+    } else {
+        $sumpoints = 0.0;
+        $summax = 0.0;
+        $stable = new html_table();
+        $stable->head = [
+            get_string('recalculategradesforensic_log_slot', 'attendance'),
+            get_string('recalculategradesforensic_slot_sessions', 'attendance'),
+            get_string('recalculategradesforensic_slot_sessionids', 'attendance'),
+            get_string('recalculategradesforensic_slot_grades', 'attendance'),
+            get_string('recalculategradesforensic_slot_policy', 'attendance'),
+            get_string('recalculategradesforensic_log_setmax', 'attendance'),
+            get_string('recalculategradesforensic_slot_rule', 'attendance'),
+            get_string('recalculategradesforensic_log_insummary', 'attendance'),
+        ];
+        foreach ($slotrows as $sr) {
+            if (!empty($sr->included_in_summary)) {
+                $sumpoints += (float) $sr->slot_grade_policy;
+                $summax += (float) $sr->slot_maxgrade;
+            }
+            if ((int) $sr->min_autoassign === 0 && (int) $sr->max_autoassign === 0) {
+                $rule = get_string('recalculategradesforensic_slot_rule_min', 'attendance');
+            } else {
+                $rule = get_string('recalculategradesforensic_slot_rule_max', 'attendance');
+            }
+            $stable->data[] = [
+                userdate((int) $sr->sessdate) . ' +' . (int) $sr->duration . 's',
+                (int) $sr->sessions_in_slot,
+                s($sr->session_ids),
+                format_float((float) $sr->min_grade, 5) . ' … ' . format_float((float) $sr->max_grade, 5),
+                format_float((float) $sr->slot_grade_policy, 5),
+                format_float((float) $sr->slot_maxgrade, 5),
+                $rule,
+                !empty($sr->included_in_summary) ? get_string('yes', 'moodle') : get_string('no', 'moodle'),
+            ];
+        }
+        $out .= html_writer::table($stable);
+        $pct = $summax > 0 ? ($sumpoints / $summax) : 0;
+        $out .= html_writer::div(get_string('recalculategradesforensic_slot_total', 'attendance', (object) [
+            'points' => format_float($sumpoints, 5),
+            'max' => format_float($summax, 5),
+            'pct' => format_float($pct * 100, 2),
+        ]), 'alert alert-secondary');
+    }
+
+    return $out;
+}
+
+/**
  * Build HTML forensic drill-down for one pair.
  *
  * @param moodle_database $DB
@@ -342,17 +615,25 @@ function mod_attendance_recalculate_forensic_html(
     $olist .= html_writer::end_tag('ol');
     $out .= $olist;
 
+    $out .= mod_attendance_recalculate_forensic_basis_html(
+        $DB,
+        $attendanceid,
+        $userid,
+        (int) $course->startdate
+    );
+
     if ($gi) {
-        $hist = $DB->get_records_sql(
-            "SELECT h.timemodified, h.rawgrade, h.finalgrade, h.usermodified
-               FROM {grade_grades_history} h
+        $histcols = $DB->get_columns('grade_grades_history');
+        $hassource = array_key_exists('source', $histcols);
+        $histsql = "SELECT h.timemodified, h.rawgrade, h.finalgrade, h.usermodified";
+        if ($hassource) {
+            $histsql .= ", h.source";
+        }
+        $histsql .= " FROM {grade_grades_history} h
               WHERE h.itemid = ?
                 AND h.userid = ?
-           ORDER BY h.timemodified DESC",
-            [$gi->id, $userid],
-            0,
-            25
-        );
+           ORDER BY h.timemodified DESC";
+        $hist = $DB->get_records_sql($histsql, [$gi->id, $userid], 0, 25);
         if ($hist) {
             $table = new html_table();
             $table->head = [
@@ -361,18 +642,25 @@ function mod_attendance_recalculate_forensic_html(
                 get_string('recalculategradesforensic_hist_raw', 'attendance'),
                 get_string('recalculategradesforensic_hist_final', 'attendance'),
             ];
+            if ($hassource) {
+                $table->head[] = get_string('recalculategradesforensic_hist_source', 'attendance');
+            }
             foreach ($hist as $h) {
                 $modifier = '';
                 if (!empty($h->usermodified)) {
                     $mu = $DB->get_record('user', ['id' => $h->usermodified], 'id,firstname,lastname', IGNORE_MISSING);
                     $modifier = $mu ? fullname($mu) : (string) $h->usermodified;
                 }
-                $table->data[] = [
+                $row = [
                     userdate((int) $h->timemodified),
                     s($modifier),
                     is_null($h->rawgrade) ? '-' : format_float((float) $h->rawgrade, 5),
                     is_null($h->finalgrade) ? '-' : format_float((float) $h->finalgrade, 5),
                 ];
+                if ($hassource) {
+                    $row[] = s($h->source ?? '');
+                }
+                $table->data[] = $row;
             }
             $out .= html_writer::tag('h4', get_string('recalculategradesforensic_hist_title', 'attendance'));
             $out .= html_writer::table($table);
