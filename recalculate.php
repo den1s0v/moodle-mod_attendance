@@ -27,7 +27,7 @@ require_once(__DIR__ . '/locallib.php');
 require_once($CFG->libdir . '/gradelib.php');
 require_once($CFG->dirroot . '/mod/attendance/classes/summary.php');
 
-$action = optional_param('action', 'preview', PARAM_ALPHA);
+$action = optional_param('action', '', PARAM_ALPHA);
 $attendanceid = optional_param('attendanceid', 0, PARAM_INT);
 $cmid = optional_param('cmid', 0, PARAM_INT);
 $forensic_userid = optional_param('forensic_userid', 0, PARAM_INT);
@@ -1005,12 +1005,25 @@ if ($fixts === false) {
     $fixdate = date('Y-m-d');
 }
 
+$ispost = ($_SERVER['REQUEST_METHOD'] === 'POST');
+if ($ispost && $action !== '') {
+    require_sesskey();
+}
+
+$runsearch = $ispost && in_array($action, ['preview', 'apply'], true);
+$runforensic = $ispost && (
+    $action === 'forensic' ||
+    ($runsearch && $forensic_userid > 0)
+);
+
+$candidates = [];
 $diag = null;
 $reasoncounts = null;
 $excludedlower = 0;
 $aftersummary = [];
 $pool = [];
-if ($mode === 'sql_seeded') {
+
+if ($runsearch && $mode === 'sql_seeded') {
     $seedpairs = mod_attendance_recalculate_parse_seed_pairs($seedtext);
     $pool = mod_attendance_recalculate_seed_candidates($DB, $seedpairs, $era, $fixts);
     $pool = mod_attendance_recalculate_enrich_expected_from_summary($pool);
@@ -1023,7 +1036,7 @@ if ($mode === 'sql_seeded') {
         $candidates = mod_attendance_recalculate_filter_reject_lower($candidates, $eps);
         $excludedlower = $beforect - count($candidates);
     }
-} else {
+} else if ($runsearch) {
     $requireconflict = ($mode === 'strict');
     $pool = mod_attendance_recalculate_query_candidates($DB, $attendance_instance_id, $era, $fixts, $eps, $requireconflict);
     $pool = mod_attendance_recalculate_enrich_expected_from_summary($pool);
@@ -1038,7 +1051,7 @@ if ($mode === 'sql_seeded') {
     }
 }
 
-if (empty($candidates) && $mode !== 'sql_seeded') {
+if ($runsearch && empty($candidates) && $mode !== 'sql_seeded') {
     $diag = mod_attendance_recalculate_diagnostic_counts($DB, $attendance_instance_id, $era, $fixts, $eps);
 }
 
@@ -1051,34 +1064,16 @@ foreach ($candidates as $row) {
 $numattendance = count($attendancekeys);
 $numusers = count($userkeys);
 
-$beforesnapshot = mod_attendance_get_grade_snapshot($DB, $candidates);
+$beforesnapshot = $runsearch ? mod_attendance_get_grade_snapshot($DB, $candidates) : [];
 $aftersnapshot = [];
 $applydone = false;
 $updatedactivities = 0;
 $updatedusers = 0;
+$applymessage = '';
 
-echo $OUTPUT->header();
-echo $OUTPUT->heading(get_string('recalculategrades', 'attendance'));
-
-if ($forensic_userid > 0) {
-    if ($attendance_instance_id > 0) {
-        echo html_writer::div(
-            mod_attendance_recalculate_forensic_html($DB, $attendance_instance_id, $forensic_userid, $era, $fixts, $eps),
-            'card card-body mb-3'
-        );
-    } else {
-        echo $OUTPUT->notification(get_string('recalculategradesforensic_needscope', 'attendance'),
-            \core\output\notification::NOTIFY_WARNING);
-    }
-}
-
-if ($cmidresolvednote !== '') {
-    echo $OUTPUT->notification($cmidresolvednote, \core\output\notification::NOTIFY_WARNING);
-}
-if ($action === 'apply') {
-    require_sesskey();
+if ($action === 'apply' && $runsearch) {
     if (empty($candidates)) {
-        echo $OUTPUT->notification(get_string('recalculategradesnothing', 'attendance'), \core\output\notification::NOTIFY_INFO);
+        $applymessage = get_string('recalculategradesnothing', 'attendance');
     } else {
         $pairsbyattendance = [];
         foreach ($candidates as $row) {
@@ -1097,49 +1092,34 @@ if ($action === 'apply') {
             $updatedactivities++;
             $updatedusers += count($userids);
         }
-        $message = get_string('recalculategradesdone', 'attendance',
+        $applymessage = get_string('recalculategradesdone', 'attendance',
             (object) ['activities' => $updatedactivities, 'users' => $updatedusers]);
-        echo $OUTPUT->notification($message, \core\output\notification::NOTIFY_SUCCESS);
         $applydone = true;
         $aftersnapshot = mod_attendance_get_grade_snapshot($DB, $candidates);
     }
 }
 
-$summary = get_string('recalculategradessummarydetailed3', 'attendance',
-    (object) [
-        'activities' => $numattendance,
-        'users' => $numusers,
-        'fixdate' => $fixdate,
-        'era' => $era,
-        'mode' => $mode,
-        'eps' => $eps,
-        'attendanceid' => $attendanceid ?: get_string('recalculategradesallinstances', 'attendance'),
-        'cmid' => $cmid > 0 ? (string) $cmid : '—',
-        'instance' => $attendance_instance_id > 0 ? (string) $attendance_instance_id : '—',
-        'rejectlower' => $reject_lower ? get_string('yes', 'moodle') : get_string('no', 'moodle'),
-    ]);
-echo html_writer::div($summary, 'alert alert-info');
+echo $OUTPUT->header();
+echo $OUTPUT->heading(get_string('recalculategrades', 'attendance'));
 
-if ($reasoncounts !== null) {
-    $reasonlines = [
-        get_string('recalculategrades_reason_title', 'attendance'),
-        get_string('recalculategrades_reason_pool', 'attendance', $reasoncounts->pool_count),
-        get_string('recalculategrades_reason_droppedsummary', 'attendance', $reasoncounts->dropped_after_summary),
-        get_string('recalculategrades_reason_mismatchsummary', 'attendance', count($aftersummary)),
-        get_string('recalculategrades_reason_raise', 'attendance', $reasoncounts->apply_raise),
-        get_string('recalculategrades_reason_lower', 'attendance', $reasoncounts->apply_lower),
-        get_string('recalculategrades_reason_edge', 'attendance', $reasoncounts->apply_edge),
-    ];
-    if ($reject_lower && $excludedlower > 0) {
-        $reasonlines[] = get_string('recalculategrades_reason_excludedlower', 'attendance', $excludedlower);
-    }
-    $reasonlines[] = get_string('recalculategrades_reason_applynote', 'attendance');
-    echo html_writer::div(implode(html_writer::empty_tag('br'), $reasonlines), 'alert alert-light border mb-3');
+if ($cmidresolvednote !== '') {
+    echo $OUTPUT->notification($cmidresolvednote, \core\output\notification::NOTIFY_WARNING);
 }
+
+if (!$ispost) {
+    echo html_writer::div(get_string('recalculategrades_form_intro', 'attendance'), 'alert alert-info');
+}
+
+if ($applymessage !== '') {
+    $notifytype = $applydone
+        ? \core\output\notification::NOTIFY_SUCCESS
+        : \core\output\notification::NOTIFY_INFO;
+    echo $OUTPUT->notification($applymessage, $notifytype);
+}
+
 // Filter form: POST so seed textarea is reliable.
 $filterurl = new moodle_url('/mod/attendance/recalculate.php');
 $filterform = html_writer::start_tag('form', ['method' => 'post', 'action' => $filterurl->out(false), 'class' => 'mb-3']);
-$filterform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'action', 'value' => 'preview']);
 $filterform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
 
 $modeopts = [
@@ -1220,9 +1200,16 @@ $filterform .= html_writer::empty_tag('input', [
     'style' => 'max-width: 130px;',
     'class' => 'mr-2',
 ]);
-$filterform .= html_writer::empty_tag('input', [
+$filterform .= html_writer::tag('button', get_string('recalculategradesforensic_submit', 'attendance'), [
     'type' => 'submit',
-    'value' => get_string('recalculategradespreview', 'attendance'),
+    'name' => 'action',
+    'value' => 'forensic',
+    'class' => 'btn btn-outline-secondary mr-2',
+]);
+$filterform .= html_writer::tag('button', get_string('recalculategradespreview', 'attendance'), [
+    'type' => 'submit',
+    'name' => 'action',
+    'value' => 'preview',
     'class' => 'btn btn-secondary',
 ]);
 
@@ -1242,7 +1229,53 @@ $filterform .= html_writer::div(
 $filterform .= html_writer::end_tag('form');
 echo $filterform;
 
-if ($diag) {
+if ($runforensic) {
+    if ($forensic_userid > 0 && $attendance_instance_id > 0) {
+        echo html_writer::div(
+            mod_attendance_recalculate_forensic_html($DB, $attendance_instance_id, $forensic_userid, $era, $fixts, $eps),
+            'card card-body mb-3'
+        );
+    } else {
+        echo $OUTPUT->notification(get_string('recalculategradesforensic_needscope', 'attendance'),
+            \core\output\notification::NOTIFY_WARNING);
+    }
+}
+
+if ($runsearch) {
+    $summary = get_string('recalculategradessummarydetailed3', 'attendance',
+        (object) [
+            'activities' => $numattendance,
+            'users' => $numusers,
+            'fixdate' => $fixdate,
+            'era' => $era,
+            'mode' => $mode,
+            'eps' => $eps,
+            'attendanceid' => $attendanceid ?: get_string('recalculategradesallinstances', 'attendance'),
+            'cmid' => $cmid > 0 ? (string) $cmid : '—',
+            'instance' => $attendance_instance_id > 0 ? (string) $attendance_instance_id : '—',
+            'rejectlower' => $reject_lower ? get_string('yes', 'moodle') : get_string('no', 'moodle'),
+        ]);
+    echo html_writer::div($summary, 'alert alert-info');
+
+    if ($reasoncounts !== null) {
+        $reasonlines = [
+            get_string('recalculategrades_reason_title', 'attendance'),
+            get_string('recalculategrades_reason_pool', 'attendance', $reasoncounts->pool_count),
+            get_string('recalculategrades_reason_droppedsummary', 'attendance', $reasoncounts->dropped_after_summary),
+            get_string('recalculategrades_reason_mismatchsummary', 'attendance', count($aftersummary)),
+            get_string('recalculategrades_reason_raise', 'attendance', $reasoncounts->apply_raise),
+            get_string('recalculategrades_reason_lower', 'attendance', $reasoncounts->apply_lower),
+            get_string('recalculategrades_reason_edge', 'attendance', $reasoncounts->apply_edge),
+        ];
+        if ($reject_lower && $excludedlower > 0) {
+            $reasonlines[] = get_string('recalculategrades_reason_excludedlower', 'attendance', $excludedlower);
+        }
+        $reasonlines[] = get_string('recalculategrades_reason_applynote', 'attendance');
+        echo html_writer::div(implode(html_writer::empty_tag('br'), $reasonlines), 'alert alert-light border mb-3');
+    }
+}
+
+if ($runsearch && $diag) {
     $lines = [
         get_string('recalculategradesdiag_title', 'attendance'),
         get_string('recalculategradesdiag_eligible', 'attendance', $diag->eligible_gradebook),
@@ -1255,39 +1288,40 @@ if ($diag) {
     echo html_writer::div(implode(html_writer::empty_tag('br'), $lines), 'alert alert-secondary');
 }
 
-if ($mode === 'sql_seeded' && mod_attendance_recalculate_parse_seed_pairs($seedtext) === []) {
-    echo html_writer::div(get_string('recalculategradesseedempty', 'attendance'), 'alert alert-warning');
-} else if (empty($candidates)) {
-    echo html_writer::div(get_string('recalculategradesnothing', 'attendance'), 'alert alert-warning');
-} else {
-    $applyurl = new moodle_url('/mod/attendance/recalculate.php');
-    $applyform = html_writer::start_tag('form', ['method' => 'post', 'action' => $applyurl->out(false), 'class' => 'mb-3']);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'action', 'value' => 'apply']);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'attendanceid', 'value' => $attendanceid]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'cmid', 'value' => $cmid]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'forensic_userid', 'value' => $forensic_userid]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'reject_lower', 'value' => $reject_lower]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'era', 'value' => $era]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'fixdate', 'value' => $fixdate]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'eps', 'value' => $eps]);
-    $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'mode', 'value' => $mode]);
-    $applyform .= html_writer::tag('textarea', s($seedtext), [
-        'name' => 'seed_text',
-        'style' => 'display:none',
-        'aria-hidden' => 'true',
-    ]);
-    $applyform .= html_writer::empty_tag('input', [
-        'type' => 'submit',
-        'value' => get_string('recalculategradesconfirm', 'attendance'),
-        'class' => 'btn btn-danger',
-    ]);
-    $applyform .= html_writer::end_tag('form');
-    echo $applyform;
-}
+if ($runsearch) {
+    if ($mode === 'sql_seeded' && mod_attendance_recalculate_parse_seed_pairs($seedtext) === []) {
+        echo html_writer::div(get_string('recalculategradesseedempty', 'attendance'), 'alert alert-warning');
+    } else if (empty($candidates)) {
+        echo html_writer::div(get_string('recalculategradesnothing', 'attendance'), 'alert alert-warning');
+    } else {
+        $applyurl = new moodle_url('/mod/attendance/recalculate.php');
+        $applyform = html_writer::start_tag('form', ['method' => 'post', 'action' => $applyurl->out(false), 'class' => 'mb-3']);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'action', 'value' => 'apply']);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'attendanceid', 'value' => $attendanceid]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'cmid', 'value' => $cmid]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'forensic_userid', 'value' => $forensic_userid]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'reject_lower', 'value' => $reject_lower]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'era', 'value' => $era]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'fixdate', 'value' => $fixdate]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'eps', 'value' => $eps]);
+        $applyform .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'mode', 'value' => $mode]);
+        $applyform .= html_writer::tag('textarea', s($seedtext), [
+            'name' => 'seed_text',
+            'style' => 'display:none',
+            'aria-hidden' => 'true',
+        ]);
+        $applyform .= html_writer::empty_tag('input', [
+            'type' => 'submit',
+            'value' => get_string('recalculategradesconfirm', 'attendance'),
+            'class' => 'btn btn-danger',
+        ]);
+        $applyform .= html_writer::end_tag('form');
+        echo $applyform;
+    }
 
-if (!empty($candidates)) {
-    $table = new html_table();
+    if (!empty($candidates)) {
+        $table = new html_table();
     $table->head = [
         get_string('course'),
         get_string('modulename', 'attendance'),
@@ -1342,9 +1376,10 @@ if (!empty($candidates)) {
         }
         $table->data[] = $cells;
     }
-    echo html_writer::table($table);
-    if ($mode !== 'sql_seeded') {
-        echo html_writer::div(get_string('recalculategrades_tablehelp', 'attendance'), 'text-muted small mt-2');
+        echo html_writer::table($table);
+        if ($mode !== 'sql_seeded') {
+            echo html_writer::div(get_string('recalculategrades_tablehelp', 'attendance'), 'text-muted small mt-2');
+        }
     }
 }
 

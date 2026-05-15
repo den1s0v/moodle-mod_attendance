@@ -136,3 +136,5 @@ $string['recalculategrades_col_conflict'] = 'Конфликт слота (SQL)';
 $string['recalculategrades_col_rawafter'] = 'Raw после apply';
 $string['recalculategrades_col_finalafter'] = 'Итог после apply';
 $string['recalculategrades_tablehelp'] = '«Ожидаемый raw после пересчёта» — то, что запишет модуль тем же summary, что и в работе. «SQL диагностика» — отдельная проверка; при расхождении используйте форензику по пользователю.';
+$string['recalculategrades_form_intro'] = 'Задайте параметры и нажмите «Предпросмотр» или «Разбор одного пользователя». Поиск по сайту не запускается, пока вы не отправите форму.';
+$string['recalculategradesforensic_submit'] = 'Разбор одного пользователя (без поиска по сайту)';
